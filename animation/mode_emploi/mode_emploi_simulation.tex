@@ -1,0 +1,492 @@
+\documentclass[aspectratio=169,9pt]{beamer}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[french]{babel}
+\usepackage{amsmath,amssymb,mathtools,bm}
+\usepackage{tikz}
+\usepackage{pgfplots}\pgfplotsset{compat=1.17}\usepgfplotslibrary{groupplots}
+\usepackage{siunitx}\sisetup{locale=FR}
+\usepackage{booktabs}
+\usetikzlibrary{shapes.misc,calc,arrows.meta}
+
+\usepackage{graphicx}
+\usetheme{default}
+\setbeamertemplate{navigation symbols}{}
+\setbeamersize{text margin left=8mm,text margin right=8mm}
+\setbeamerfont{frametitle}{series=\bfseries,size=\large}
+\setlength{\abovedisplayskip}{3pt}\setlength{\belowdisplayskip}{3pt}\setlength{\abovedisplayshortskip}{1pt}\setlength{\belowdisplayshortskip}{1pt}
+
+% ---------- charte « Laboratoire Ampère » ----------
+\definecolor{ampo}{RGB}{232,96,40}
+\definecolor{ampp}{RGB}{90,25,70}
+\definecolor{ampg}{RGB}{90,90,90}
+\setbeamercolor{structure}{fg=ampp}
+\setbeamercolor{block title}{bg=ampp!85,fg=white}
+\setbeamercolor{block body}{bg=ampo!10}
+\setbeamercolor{itemize item}{fg=ampo}
+\setbeamercolor{enumerate item}{fg=ampo}
+\newcommand{\ampdate}{05/11/2026}
+\newsavebox{\tutbox}
+\sbox{\tutbox}{\includegraphics[height=8mm]{img/tutelles.png}}
+% bandeau bas : tutelles + bloc dégradé (date, numéro)
+\newcommand{\ampfooter}{%
+  \hbox to \paperwidth{\hspace{1mm}\usebox{\tutbox}\hspace{1mm}%
+  \tikz[baseline=0pt]{\shade[left color=ampo,right color=ampp] (0,0) rectangle (\dimexpr\paperwidth-\wd\tutbox-4mm\relax,8mm);
+    \node[white,anchor=west,font=\itshape\small] at (1.5mm,4mm){Dept. AIS -- \ampdate};
+    \node[white,anchor=east,font=\bfseries] at (\dimexpr\paperwidth-\wd\tutbox-5.5mm\relax,4mm){\insertframenumber};}\hfill}\vskip1mm}
+\setbeamertemplate{footline}{\ampfooter}
+\setbeamertemplate{frametitle}{%
+  \nointerlineskip\vskip2mm
+  \hbox to \dimexpr\paperwidth-12mm\relax{\hspace{-2mm}\includegraphics[height=12mm]{img/logo_ampere.png}\hspace{4mm}%
+    \parbox[b][12mm][c]{0.68\paperwidth}{\usebeamerfont{frametitle}\color{ampg}\insertframetitle}\hfill\includegraphics[height=12mm]{img/logo_kiwee.png}}%
+  \vskip1mm
+  \hbox{\hspace{-2mm}\tikz\shade[left color=ampo,right color=ampp] (0,0) rectangle (\dimexpr\paperwidth-12mm\relax,1.1mm);}\vskip1mm}
+
+% ---------- notations (identiques au rapport) ----------
+\newcommand{\vect}[1]{\bm{#1}}
+\newcommand{\mat}[1]{\bm{#1}}
+\newcommand{\T}{^{\!\top}}
+\newcommand{\dt}[1]{\dot{#1}}
+\newcommand{\ddt}[1]{\ddot{#1}}
+\newcommand{\q}{\vect{q}}
+\newcommand{\Mm}{\mat{M}}
+\newcommand{\nn}[1]{\vect{n}_{#1}}
+\newcommand{\uu}[1]{{\vect{u}_{#1}}}
+\newcommand{\NN}{\mat{\mathcal N}}
+\newcommand{\UU}{\mat{\mathcal U}}
+\newcommand{\one}{\vect{1}}
+\newcommand{\diag}{\operatorname{diag}}
+\newcommand{\bdiag}{\operatorname{bdiag}}
+\newcommand{\lJJ}[1]{l_{J_{#1},J_{#1+1}}}
+\newcommand{\lG}[1]{l_{J_{#1},G_{#1}}}
+\newcommand{\lA}[1]{l_{J_{#1},A_{#1}}}
+\newcommand{\Nb}{N}
+
+\tikzset{
+  portion/.style={line width=11pt, line cap=round, gray!25},
+  articul/.style={circle, draw=black, fill=white, inner sep=1.6pt, thick},
+  force/.style={-{Stealth[length=2.6mm]}, thick, red!70!black},
+  vec/.style={-{Stealth[length=2.6mm]}, thick},
+  axe/.style={-{Stealth[length=2mm]}, gray, thin},
+  essieu/.style={cross out, draw=red!70!black, thick, inner sep=2.2pt, minimum size=5pt},
+}
+
+
+% diapositive de titre de partie
+\newcommand{\sectionslide}[3]{%
+\begin{frame}[plain]
+\begin{tikzpicture}[remember picture,overlay]
+  \node[anchor=north west,inner sep=0] at ([xshift=6mm,yshift=-4mm]current page.north west){\includegraphics[height=14mm]{img/logo_ampere.png}};
+  \node[anchor=north east,inner sep=0] at ([xshift=-6mm,yshift=-4mm]current page.north east){\includegraphics[height=14mm]{img/logo_kiwee.png}};
+  \node[font=\bfseries\fontsize{54}{54}\selectfont\color{ampo}] at ([xshift=-52mm,yshift=8mm]current page.center){#1};
+  \node[anchor=west,text width=0.66\paperwidth,font=\bfseries\color{ampg}] at ([xshift=-36mm,yshift=8mm]current page.center){\LARGE #2};
+  \shade[left color=ampo,right color=ampp] ([xshift=-36mm,yshift=-1mm]current page.center) rectangle ++(112mm,-1.4mm);
+  \node[anchor=north west,text width=0.66\paperwidth,font=\color{ampo!90!black}] at ([xshift=-36mm,yshift=-5mm]current page.center){\large #3};
+  \node[anchor=south west,inner sep=0] at (current page.south west){\vbox{\ampfooter}};
+\end{tikzpicture}
+\end{frame}}
+
+\title{Mode d'emploi de l'outil de simulation du convoi articulé}
+\author{}
+\date{}
+
+\begin{document}
+\begin{frame}[plain]
+\begin{tikzpicture}[remember picture,overlay]
+  \node[anchor=north west,inner sep=0] at ([xshift=6mm,yshift=-4mm]current page.north west){\includegraphics[height=28mm]{img/logo_ampere.png}};
+  \node[anchor=north east,inner sep=0] at ([xshift=-6mm,yshift=-4mm]current page.north east){\includegraphics[height=19mm]{img/logo_kiwee.png}};
+  \node[align=center,font=\bfseries\color{ampg}] at ([xshift=3mm,yshift=-11mm]current page.north){{\Large Laboratoire Ampère}\\[-0.5mm]{\normalsize Unité Mixte de Recherche CNRS}\\[-0.5mm]{\small Génie Électrique, Automatique, Bio-ingénierie}};
+  \shade[left color=ampo,right color=ampp] ([xshift=36mm,yshift=-27mm]current page.north west) rectangle ([xshift=-6mm,yshift=-28.5mm]current page.north east);
+  \node[align=center,text width=0.85\paperwidth,font=\bfseries\color{ampp}] at ([yshift=6mm]current page.center){{\Huge Outil de simulation du convoi articulé\\ Mode d'emploi}};
+  \node[align=center,text width=0.85\paperwidth,font=\bfseries\color{ampo!90!black}] at ([yshift=-12mm]current page.center){\large Prise en main, paramétrage, manœuvres, lecture des résultats, modes dégradés};
+  \node[align=center,font=\bfseries\color{ampg}] at ([yshift=-26mm]current page.center){\large Hugo TESTANIERE};
+  \node[anchor=south west,inner sep=0] at ([yshift=0mm]current page.south west){\vbox{\ampfooter}};
+\end{tikzpicture}
+\end{frame}
+
+
+\newcommand{\bou}[1]{\textbf{\color{ampp}#1}}
+\newcommand{\img}[2]{\includegraphics[#1]{img/#2}}
+
+\begin{frame}{Plan}
+  \begin{enumerate}
+    \item Prise en main : lancer l'outil, première simulation
+    \item Paramétrage : paramètres généraux, pilote, articulations, vérins, vectoring
+    \item Les manœuvres (trajectoires) disponibles
+    \item Lire et comparer les résultats
+    \item Modes dégradés : injection de défauts, scénarios aléatoires, campagnes
+    \item Conseils, limites et reconstruction de l'outil
+  \end{enumerate}
+\end{frame}
+
+\sectionslide{1}{Prise en main}{Lancer l'outil et réaliser une première simulation}
+
+\begin{frame}{À quoi sert l'outil ?}
+  \begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    Simuler en boucle fermée un \bou{convoi articulé} ($N$ portions) qui suit une trajectoire, pour :
+    \begin{itemize}
+      \item comparer des \bou{lois de commande} des articulations (amortissement $c$, vérins hydrauliques) et le \bou{vectoring} de couple ;
+      \item mesurer la \bou{qualité du suivi} (tête, queue), les plots touchés, l'amplification arrière ;
+      \item tester des \bou{manœuvres} normalisées (ISO 3888-2) ou urbaines, avec urgences ;
+      \item analyser des \bou{modes dégradés} (capteurs, vérins, moteurs, adhérence).
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{block}{Ce que vous obtenez}
+      Animation du convoi et de ses efforts, courbes (écart latéral, braquage, couples d'articulation, pressions), indicateurs chiffrés, comparaison avec $c=0$ ou avec le cas nominal.
+    \end{block}
+    \begin{block}{Ce que ce n'est pas}
+      Un modèle de pneu complet ni un outil validé sur essais du convoi : voir les limites (dernière partie).
+    \end{block}
+  \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Lancer l'outil}
+  \begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \begin{enumerate}
+      \item Ouvrir le dossier \texttt{Simulation\_Convoi}.
+      \item Double-cliquer sur \texttt{simulation\_convoi.html} : la page s'ouvre dans le navigateur (Chrome, Edge, Firefox, Safari).
+      \item Aucune installation, aucun réseau : un seul fichier contient le moteur, l'interface et les logos.
+      \item Pour les défauts : \texttt{simulation\_degrade.html}, ou le lien « Modes dégradés » en haut de la page.
+    \end{enumerate}
+    \medskip
+    \begin{alertblock}{Une simulation = un clic}
+      Rien ne se calcule tant que l'on n'a pas cliqué sur \textbf{Simuler} : régler les curseurs est sans effet immédiat.
+    \end{alertblock}
+  \end{column}
+  \begin{column}{0.44\textwidth}
+    \begin{tabular}{@{}ll@{}}
+      \toprule
+      Fichier & Rôle\\\midrule
+      \texttt{simulation\_convoi.html} & mode nominal\\
+      \texttt{simulation\_degrade.html} & + défauts\\
+      \texttt{rapport\_outil\_simulation.pdf} & rapport complet\\
+      \texttt{LISEZMOI.md} & notice courte\\\bottomrule
+    \end{tabular}
+  \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{L'interface en un coup d'œil}
+  \centering
+  \img{height=0.58\textheight}{ui_haut.png}\\[1mm]
+  {\footnotesize Haut : onglets de manœuvre. Panneau : paramètres généraux, trois menus repliables (pilote, articulations, vectoring), paramètres de la trajectoire, bouton \textbf{Simuler}.}
+\end{frame}
+
+\begin{frame}{Première simulation en quatre étapes}
+  \begin{enumerate}
+    \item \bou{Choisir la manœuvre} dans les onglets (ex. \emph{Slalom}).
+    \item \bou{Régler} le nombre de portions $N$ (2 à 10) et la vitesse d'avance (5 à 50 km/h).
+    \item \bou{Ouvrir si besoin} les menus \emph{Commande pilote}, \emph{Commande des articulations}, \emph{Commande vectoring} (repliés au démarrage).
+    \item \bou{Cliquer sur Simuler} : la barre indique l'avancement, puis l'animation démarre dès que le calcul est fini.
+  \end{enumerate}
+  \medskip
+  \begin{block}{Réglage de départ conseillé}
+    $N=5$, \SI{20}{km/h}, slalom, $c\approx\SI{2700}{N.m.s/rad}$, dynamique des vérins cochée, vectoring désactivé : le convoi suit la trajectoire (erreur de queue $\approx\SI{45}{cm}$, aucun plot touché, RWA $\approx1{,}1$).
+  \end{block}
+\end{frame}
+
+\begin{frame}{Lire l'animation}
+  \centering
+  \img{height=0.58\textheight}{ui_anim.png}\\[1mm]
+  {\footnotesize Portions et efforts de pneus (flèches), trajectoire de référence (pointillés), plots (triangles orange, rouges s'ils sont touchés), jauges accélérateur / frein mécanique / récupération.}
+\end{frame}
+
+\begin{frame}{Commandes de lecture et courbes}
+  \begin{columns}[T]
+  \begin{column}{0.46\textwidth}
+    \begin{itemize}
+      \item \bou{Pause / Rejouer}, \bou{vitesse} d'animation (×1, ×2, …), curseur de temps.
+      \item Case \bou{efforts} : affiche ou masque les flèches d'efforts latéraux.
+      \item Vue d'ensemble : trajectoire de la tête (jaune) et de la queue (vert).
+      \item Courbes : écart latéral à la trajectoire, braquage de la tête, couples d'articulation (avec la saturation $\pm\SI{2500}{N.m}$), et selon les réglages pressions, courants et efforts de vectoring.
+      \item Menu \emph{Courbes affichées} : choisir celles à tracer.
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.52\textwidth}
+    \img{width=\textwidth,height=0.55\textheight,keepaspectratio}{ui_courbes.png}
+  \end{column}
+  \end{columns}
+\end{frame}
+
+\sectionslide{2}{Paramétrage}{Ce que règle chaque curseur et chaque menu}
+
+\begin{frame}{Paramètres généraux}
+  \small
+  \begin{tabular}{@{}p{6.4cm}p{3.6cm}l@{}}
+    \toprule
+    Paramètre & Plage & Défaut\\\midrule
+    Nombre de portions $N$ & 2 à 10 & 5\\
+    Vitesse d'avance $V$ & 5 à 50 km/h & 15 km/h\\
+    Durée de simulation & 0 à 120 s (0 : auto) & auto\\
+    Comparer avec $c=0$ (sans amortissement) & case & non\\
+    Coefficient d'adhérence $\mu$ (paramètres avancés) & 0,1 à 1,5 & 0,8\\
+    Première articulation bloquée & case & oui\\
+    Saturation des pneus ($\mu F_z$) et des couples d'articulation ($\pm\SI{2500}{N.m}$) & cases & oui\\\bottomrule
+  \end{tabular}
+  \medskip
+
+  La \bou{durée automatique} est calculée à partir de la longueur de la trajectoire et de la vitesse. Les \bou{paramètres avancés} (masses, inerties, longueurs, rigidité des pneus) sont repliés : par défaut $M_1=300$, $M_j=500$, $M_n=\SI{300}{kg}$, $L=\SI{1,8}{m}$, $K_t=\SI{13600}{N/rad}$.
+\end{frame}
+
+\begin{frame}{Les trois menus de commande}
+  \centering
+  \img{height=0.70\textheight}{ui_menus.png}
+\end{frame}
+
+\begin{frame}{Menu « Commande pilote »}
+  \begin{itemize}
+    \item \bou{Gain du pilote sur la direction} $g$ (0,3 à 3, défaut 1) : le conducteur braque l'essieu de tête avec une loi de Stanley ; un gain plus fort corrige plus vite l'écart latéral mais peut osciller.
+    \item \bou{Récupération d'énergie au lever de pédale} (0 à 100\,\%, défaut 20\,\%) : fraction de la régénération maximale utilisée quand on lève le pied ; au-delà, c'est le frein \emph{mécanique}.
+    \item \bou{Circuit urbain} : accélération latérale de confort (1,5\,m/s$^2$), décélération avant les virages (2,5), accélération en sortie (1,2) : ils fixent le profil de vitesse.
+    \item \bou{Urgences} : piéton (distance d'apparition 25\,m, temps de réaction 0,6\,s), évitement (40\,m, décalage 2\,m), décélération d'urgence 7\,m/s$^2$.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Menu « Commande des articulations »}
+  \begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \begin{itemize}
+      \item \bou{$c$ moyen} (N$\cdot$m$\cdot$s/rad) : curseur à échelle quadratique, $c=10^5(s/1000)^2$ ; 0 = articulations libres.
+      \item \bou{Loi de répartition} le long du convoi : uniforme, linéaire (pente), polynomiale, gaussienne ; le graphique montre $c_k$ pour chaque articulation.
+      \item Case \bou{optimisé selon $N$ et la vitesse} : applique la table des gains de l'optimisation (N de 3 à 10, 10 à 40 km/h).
+      \item Case \bou{adapter $c$ en direct} : $c$ suit la vitesse instantanée du convoi (filtre 0,5\,s) au lieu de la vitesse initiale.
+      \item \bou{Dynamique des vérins} : remplace l'amortisseur idéal par le modèle hydraulique ; options « vérins non contrôlés » et « boucle fermée sur l'effort ».
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{alertblock}{À retenir}
+      Modifier $c$ ou la répartition à la main désactive la case « optimisé ».
+    \end{alertblock}
+    \begin{block}{Ordre de grandeur}
+      À \SI{20}{km/h}, $N=5$ : $c\approx\SI{2000}{N.m.s/rad}$, plus fort à l'avant (pente $+0{,}75$).
+    \end{block}
+  \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Dynamique des vérins : réglages avancés}
+  \small
+  \begin{columns}[T]
+  \begin{column}{0.56\textwidth}
+    \begin{tabular}{@{}p{5.2cm}l@{}}
+      \toprule
+      Paramètre & Défaut\\\midrule
+      Diamètre piston / tige & \SI{32}{mm} / \SI{20}{mm}\\
+      Pression de gonflage (tige sortie) & \SI{15}{bar}\\
+      Accumulateur : $P_0$, $V_0$ & \SI{10}{bar}, \SI{160}{mL}\\
+      Limiteur de pression & \SI{200}{bar}\\
+      Module de compressibilité $B$ & \SI{1,5}{GPa}\\
+      Vanne : $\omega_n$, $\zeta$ & \SI{20}{rad/s}, $0{,}9$\\
+      Boucle d'effort $K_p$, $K_i$ & $0{,}5$, \SI{5}{s^{-1}}\\
+      Géométrie : $R_1$, $L_2$, $\varphi$, $\lambda_0$ & \SI{0,15}{m}, \SI{0,9}{m}, \SI{20}{\degree}, \SI{0,465}{m}\\\bottomrule
+    \end{tabular}
+  \end{column}
+  \begin{column}{0.40\textwidth}
+    \begin{itemize}
+      \item \bou{Facteur $K_s$} sur la section de la vanne : la table constructeur sous-estime le débit réel (essais : ×2 à ×3).
+      \item \bou{Vitesse minimale de tige} (3\,mm/s) : en dessous, la vanne reste ouverte.
+      \item \bou{Vitesse minimale du convoi} pour piloter les vérins (0 : aucune).
+      \item Le calcul est plus lent avec les vérins (pas de \SI{0,5}{ms}).
+    \end{itemize}
+  \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Menu « Commande vectoring »}
+  \begin{itemize}
+    \item Case \bou{Activer le vectoring} : crée un moment de lacet sur chaque portion par différence de couples entre roues gauche et droite (moteurs-roues).
+    \item \bou{Gains} $k_\omega$ et $k_d$ (10\,s$^{-1}$ chacun), \bou{vitesse minimale d'activation} (10\,km/h, montée progressive jusqu'à $1{,}4\times$).
+    \item \bou{Couple moteur} : courbes mesurées (traction, régénération à 100\,A ou 50\,A) ou valeur constante (\SI{250}{N.m}).
+    \item \bou{Demi-voie} des roues motrices (0,46\,m), \bou{rayon de roue} (0,23\,m).
+    \item Le vectoring \bou{n'utilise que la capacité restante} des moteurs et \bou{jamais le frein mécanique} : la régénération passe en premier, la traction de l'autre roue complète.
+  \end{itemize}
+  \begin{block}{Bon réflexe}
+    Comparer deux simulations identiques, avec et sans vectoring : la page affiche aussi la simulation sans vectoring en fantôme.
+  \end{block}
+\end{frame}
+
+\sectionslide{3}{Les manœuvres}{Huit onglets, huit situations}
+
+\begin{frame}{Les huit manœuvres}
+  \footnotesize
+  \begin{tabular}{@{}p{3.2cm}p{5.6cm}p{3.6cm}@{}}
+    \toprule
+    Onglet & Principe & Paramètres clés\\\midrule
+    Essais de volant & braquage imposé (échelon, impulsion, doublet, sinus, chirp, sinus avec palier) ; stabilité & amplitude 3\,$^\circ$, début 2\,s, fréquence 0,5\,Hz\\
+    Test de l'élan (ISO 3888-2) & double changement de voie dans 18 plots, gaz relâchés à l'entrée & $b=\SI{1,5}{m}$, entrée 25\,m\\
+    Slalom & plots sur l'axe aux maxima d'amplitude & $A=\SI{1,5}{m}$, espacement 12\,m, 5 plots\\
+    Virage & arc de rayon $R$, couloir de plots & $R=\SI{12}{m}$, $90^\circ$, largeur 2,5\,m\\
+    Cercle & virage stabilisé, vitesse croissante & $R=\SI{15}{m}$, 2 tours, jusqu'à 30\,km/h\\
+    Circuit urbain & intersections, chicane, rond-point ; profil de vitesse ; urgences & 660\,m (ou aléatoire), voie 3\,m\\
+    Freinage en virage & virage de $90^\circ$ avec freinage sur l'arc & $R=\SI{20}{m}$, 3\,m/s$^2$, jusqu'à 5\,km/h\\
+    Ligne droite en dévers & pesanteur latérale & 100\,m, pente $8^\circ$\\\bottomrule
+  \end{tabular}
+\end{frame}
+
+\begin{frame}{Slalom et test de l'élan : plots et contacts}
+  \begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \begin{itemize}
+      \item \bou{Slalom} : les plots sont sur l'axe, à l'abscisse de chaque maximum d'amplitude ; le convoi les contourne alternativement par la gauche et par la droite.
+      \item \bou{ISO 3888-2} : trois couloirs de largeurs $1{,}1b+0{,}25$, $b+1$ et $\max(1{,}3b+0{,}25;3)$, avec $b=\SI{1,5}{m}$.
+      \item Chaque portion est un rectangle de largeur \SI{1,5}{m} : un plot touché devient \bou{rouge} et est compté (« plots touchés : n / N »).
+      \item À \SI{20}{km/h} le slalom par défaut ne touche aucun plot ; à \SI{30}{km/h} trois sur cinq.
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.44\textwidth}
+    \begin{block}{Pour explorer}
+      Augmenter la vitesse par pas de 5\,km/h, relever l'erreur de queue et les plots touchés ; changer $N$ et la répartition de $c$ ; activer le vectoring.
+    \end{block}
+  \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Circuit urbain et urgences}
+  \begin{columns}[T]
+  \begin{column}{0.56\textwidth}
+    \img{width=\textwidth,height=0.66\textheight,keepaspectratio}{ui_urbain.png}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \small
+    \begin{itemize}
+      \item \bou{Circuit} : standard ($\approx\SI{660}{m}$) ou généré aléatoirement (graine reproductible, bouton pour tirer un autre circuit).
+      \item \bou{Largeur de voie} : 2,4 à 5\,m ; les plots bordent la voie.
+      \item La vitesse du curseur est la vitesse \emph{maximale} : le convoi freine avant chaque virage.
+      \item Case \bou{manœuvres d'urgence aléatoires} : piéton (freinage mécanique, arrêt, redémarrage) et obstacle à éviter ; un repère marque le piéton et le contact est signalé.
+    \end{itemize}
+  \end{column}
+  \end{columns}
+\end{frame}
+
+\sectionslide{4}{Lire et comparer}{Indicateurs, comparaisons, bonnes pratiques de lecture}
+
+\begin{frame}{Les indicateurs}
+  \begin{columns}[T]
+  \begin{column}{0.54\textwidth}
+    \begin{itemize}
+      \item \bou{Erreur de la queue} : écart maximal du dernier essieu à la trajectoire (affichée à côté du bouton Simuler).
+      \item \bou{Plots touchés} : $n/N$, avec l'instant du premier contact.
+      \item \bou{RWA} (amplification arrière, ISO 14791) : rapport des accélérations latérales maximales queue/tête ; $>1$ : la queue est plus sollicitée que la tête.
+      \item \bou{Déport} : écart entre la queue et la trajectoire réellement suivie par la tête.
+      \item \bou{Couples d'articulation} et leur saturation ; \bou{pressions et courants} des vérins.
+      \item \bou{Urgences} : contact oui/non, vitesse d'impact, distance minimale, distance d'arrêt.
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{block}{Statuts}
+      \textbf{fin} : trajectoire terminée.\\
+      \textbf{divergence} : le convoi ne suit plus la trajectoire (queue à plus de 12\,m ou angle relatif $>2{,}6$\,rad) : les indicateurs ne sont alors pas significatifs.
+    \end{block}
+  \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Comparer deux réglages}
+  \begin{enumerate}
+    \item \bou{Avec / sans amortissement} : cocher « comparer avec $c=0$ » : la simulation sans amortissement s'affiche en fantôme et ses courbes en trait fin.
+    \item \bou{Avec / sans vectoring} : la simulation sans vectoring est calculée et superposée.
+    \item \bou{Cas nominal / défaut} (page dégradée) : la simulation sans défaut est la référence.
+    \item Relever à chaque fois : erreur de queue, plots, RWA, couples maximaux.
+  \end{enumerate}
+  \medskip
+  \begin{alertblock}{Pour comparer proprement}
+    Ne changer qu'un seul paramètre à la fois ; garder la même vitesse, le même $N$ et la même graine (circuit aléatoire, urgences, défauts).
+  \end{alertblock}
+\end{frame}
+
+\sectionslide{5}{Modes dégradés}{Injecter des défauts et mesurer leurs conséquences}
+
+\begin{frame}{La page « modes dégradés »}
+  \begin{columns}[T]
+  \begin{column}{0.58\textwidth}
+    \img{width=\textwidth,height=0.58\textheight,keepaspectratio}{ui_degrade.png}
+  \end{column}
+  \begin{column}{0.40\textwidth}
+    \small
+    \begin{itemize}
+      \item Section 1 : le même paramétrage que la page nominale.
+      \item Section 2 : \bou{Scénario manuel}, \bou{Scénario aléatoire}, \bou{Campagne aléatoire}.
+      \item Case « comparer au cas nominal ».
+      \item Manuel : choisir un \bou{défaut}, l'\bou{articulation} (ou la portion), le côté, la valeur et l'\bou{instant d'apparition}, puis \emph{Ajouter le défaut} ; plusieurs défauts possibles ; \emph{Tout effacer}.
+    \end{itemize}
+  \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Catalogue de défauts et notation}
+  \small
+  \begin{columns}[T]
+  \begin{column}{0.58\textwidth}
+    \begin{itemize}
+      \item \bou{Capteur d'angle} : perte, figé, biais, gain, retard.
+      \item \bou{Vérins} : un vérin ouvert ou bloqué fermé, les deux hors service, articulation grippée, perte de pression.
+      \item \bou{Capteur de pression} perdu.
+      \item \bou{Moteurs-roues} : perte d'un ou deux moteurs, couple bloqué, frein traînant, batterie pleine (pas de régénération) ou vide (pas de traction) par portion, couple limité.
+      \item \bou{Vectoring} : gyroscope perdu ou biaisé, codeurs perdus.
+      \item \bou{Pneus et environnement} : crevaison, perte d'adhérence totale, d'un seul côté, flaque.
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.38\textwidth}
+    \begin{tabular}{@{}cl@{}}
+      \toprule
+      Note & Conséquence\\\midrule
+      A & sans conséquence\\
+      B & dégradation\\
+      C & sortie de trajectoire\\
+      D & perte de contrôle\\\bottomrule
+    \end{tabular}
+
+    \medskip
+    Scénario aléatoire : niveau \emph{peu}, \emph{moyennement} ou \emph{très critique} + graine. Campagne : nombre de tirages, bilan par note.
+  \end{column}
+  \end{columns}
+\end{frame}
+
+\sectionslide{6}{Conseils et limites}{Pour bien utiliser l'outil}
+
+\begin{frame}{Conseils d'utilisation}
+  \begin{itemize}
+    \item \bou{Partir du réglage par défaut}, puis modifier un paramètre à la fois.
+    \item Au-delà de \SI{30}{km/h}, les convois longs divergent dans les manœuvres de test : ce n'est pas un bug, c'est une limite de stabilité (voir le rapport d'optimisation).
+    \item Un \bou{calcul long} (urbain, vérins, 10 portions) peut prendre plusieurs secondes ; l'animation part au début dès que le calcul est fini.
+    \item \bou{Reproduire un essai} : l'adresse de la page accepte des réglages, p.\,ex. \texttt{simulation\_convoi.html\#slalom,V=20,C=2700} ; onglets : \texttt{volant}, \texttt{elan}, \texttt{slalom}, \texttt{virage}, \texttt{cercle}, \texttt{urbain}, \texttt{brake}, \texttt{dev}.
+    \item Noter les \bou{graines} (circuit aléatoire, urgences, défauts) pour pouvoir refaire le même tirage.
+    \item Le \bou{rapport complet} (\texttt{rapport\_outil\_simulation.pdf}) donne toutes les équations et les valeurs par défaut.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Limites à garder en tête}
+  \begin{itemize}
+    \item \bou{Pneus} : loi saturée simple, sans glissement combiné, relaxation ni transfert de charge ; charge verticale $mg/n_P$.
+    \item \bou{Vérins} : modèle à deux pressions, sans fuites internes ni température ; la table de vanne sous-estime le débit réel d'un facteur 2 à 3.
+    \item \bou{Pilote} : loi de Stanley sans retard de conducteur ; régulation de vitesse proportionnelle idéale.
+    \item \bou{Défauts} : modèles simples, notation A à D interne à l'outil.
+    \item \bou{Validation} : la dynamique des vérins est confrontée à des essais ; la comparaison du modèle du convoi avec le code MATLAB de référence ou avec un essai réel reste à faire.
+  \end{itemize}
+  \begin{alertblock}{Conclusion pratique}
+    Utiliser l'outil pour \emph{comparer} des réglages et des lois de commande, plutôt que pour prédire une valeur absolue.
+  \end{alertblock}
+\end{frame}
+
+\begin{frame}{Outils complémentaires et reconstruction}
+  \begin{columns}[T]
+  \begin{column}{0.5\textwidth}
+    \bou{Animation de l'articulation} (\texttt{animation\_articulation.html}, V1 et V2) : géométrie complète, vérins, circuit hydraulique, pressions en direct, simulation longue durée sur 24\,h (fuites, précharge, température).
+  \end{column}
+  \begin{column}{0.46\textwidth}
+    \bou{Reconstruire les pages} :
+    \begin{enumerate}
+      \item modifier les modules dans \texttt{doc/animation/src/} ;
+      \item \texttt{cd doc/animation \&\& python3 construire.py} ;
+      \item copier les deux pages dans \texttt{Simulation\_Convoi}.
+    \end{enumerate}
+  \end{column}
+  \end{columns}
+\end{frame}
+
+\end{document}

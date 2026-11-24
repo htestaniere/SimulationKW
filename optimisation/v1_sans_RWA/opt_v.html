@@ -1,0 +1,25 @@
+<!doctype html><meta charset="utf-8"><pre id="o"></pre>
+<script src="../src/moteur.js"></script><script src="../src/rwa.js"></script>
+<script>
+const MAN=[
+ {nom:"test de l'élan",traj:{type:'elk',A:1.5,lead:12,Lr:12,Lh:12,tail:25}},
+ {nom:'slalom',traj:{type:'slalom',A:1.5,lam:12,ncones:5,lead:12}},
+ {nom:'virage 90°',traj:{type:'turn',R:12,alpha:90,dir:1,lead:10,tail:20}},
+ {nom:'freinage en virage',traj:{type:'brake',R:20,alpha:90,dir:1,lead:15,tail:20},brake:{a:3,frac:0.3,Vend:5}}];
+const V=+((/V=([0-9]+)/.exec(location.hash)||[0,20])[1]);
+function weights(n,s){const g=[];for(let k=0;k<n;k++){const x=n>1?k/(n-1):0;g.push(Math.max(0,1+s*(1-2*x)));}const m=g.reduce((a,b)=>a+b,0)/n||1;return g.map(v=>v/m);}
+function evalCfg(N,c,s){const ck=weights(N-1,s).map(w=>c*w);let worst=0,sum=0,det=[];
+ for(const m of MAN){const r=simulateClosed({N,V,c:ck,gain:1,traj:m.traj,init:m.init||null,brake:m.brake||null,params:{sat:true,mu:0.8,fymax:0},Mmax:2500,lock:true});
+  let dep=0;if(r.frames.length>5)for(const d of deportCompute(r.frames))dep=Math.max(dep,Math.abs(d.d));
+  const bad=r.status=='diverge'||!isFinite(r.et);const j=bad?10:r.et+0.5*dep;worst=Math.max(worst,j);sum+=j;det.push({m:m.nom,et:+r.et.toFixed(3),dep:+dep.toFixed(3),bad});}
+ return{J:0.5*worst+0.5*sum/MAN.length+0.01*Math.log(c),det};}
+const res={};const t0=performance.now();
+for(let N=3;N<=10;N++){let best=null;const tried=[];
+ for(const c of [1000,2500,6000,15000,40000])for(const s of [-0.6,-0.3,0,0.3,0.6]){const e=evalCfg(N,c,s);tried.push([c,s,e.J]);if(!best||e.J<best.J)best={c,s,...e};}
+ // raffinement local
+ let step={f:1.6,ds:0.15};
+ for(let it=0;it<2;it++){const c0=best.c,s0=best.s;for(const cf of [1/step.f,1,step.f])for(const ds of [-step.ds,0,step.ds]){const c=c0*cf,s=Math.max(-0.9,Math.min(0.9,s0+ds));if(cf==1&&ds==0)continue;const e=evalCfg(N,c,s);if(e.J<best.J)best={c,s,...e};}step={f:Math.sqrt(step.f),ds:step.ds/2};}
+ res[N]={c:Math.round(best.c),s:+best.s.toFixed(2),J:+best.J.toFixed(3),det:best.det};
+ console.log('N='+N+' c='+res[N].c+' pente='+res[N].s+' J='+res[N].J+' '+JSON.stringify(best.det)+' ['+Math.round((performance.now()-t0)/1000)+' s]');}
+document.getElementById('o').textContent=JSON.stringify(res);console.log('TERMINE '+JSON.stringify(res));
+</script>

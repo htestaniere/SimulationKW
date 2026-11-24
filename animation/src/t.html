@@ -1,0 +1,10 @@
+<!doctype html><pre id="o"></pre><script src="moteur.js"></script><script src="verin.js"></script><script src="rwa.js"></script><script src="faults.js"></script><script>
+const out=[];const base={N:5,V:20,c:2700,gain:1,traj:{type:'slalom',A:1.5,lam:12,ncones:5,lead:12},params:{sat:true,mu:0.8},Mmax:2500,lock:true};
+const R0=simulateClosed(base);out.push('nominal '+R0.status+' et='+(R0.et*100).toFixed(0)+'cm');
+const tests={'capteur perdu J3':[{type:'sens_perdu',art:1,t0:3}],'capteur perdu J3-J5':[{type:'sens_perdu',art:1,t0:3},{type:'sens_perdu',art:2,t0:3},{type:'sens_perdu',art:3,t0:3}],
+ 'capteur figé J4':[{type:'sens_fige',art:2,t0:4}],'un vérin HS J3':[{type:'act_ouvert',art:1,side:1,t0:3}],'deux vérins HS tous':[1,2,3].map(a=>({type:'act_deux',art:a,t0:3})),
+ 'grippage J4':[{type:'act_grippage',art:2,t0:4}],'braquage limité 3°':[{type:'pil_limite',val:3,t0:3}],'braquage bloqué':[{type:'pil_bloque',t0:4}],
+ 'lat biais 0.8':[{type:'pil_lat_biais',val:0.8,t0:3}],'perte capteur traj':[{type:'pil_perdu',t0:4}],'retard 0.5s':[{type:'pil_retard',val:0.5,t0:3}],'adhérence 0.3':[{type:'env_adherence',val:0.3,t0:3}],'surcharge x1.8':[{type:'env_surcharge',val:1.8,t0:0}]};
+for(const [k,F] of Object.entries(tests)){const t0=performance.now();const r=simulateClosed({...base,faults:F});out.push(k+' : '+r.status+' et='+(r.et*100).toFixed(0)+'cm grade='+gradeResult(r,R0)+' ['+Math.round(performance.now()-t0)+'ms]');}
+const rs=randomScenario('moyen',3,4,true);out.push(JSON.stringify(rs));
+document.getElementById('o').textContent=out.join('\n');</script>

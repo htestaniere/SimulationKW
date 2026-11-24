@@ -1,0 +1,776 @@
+% Rapport sur l'outil de simulation du convoi articulé (simulation_convoi.html)
+% Compiler : pdflatex rapport_outil_simulation.tex (deux passes)
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[french]{babel}
+\usepackage{amsmath,amssymb,mathtools,bm}
+\usepackage{booktabs,array,tabularx,longtable}
+\usepackage{siunitx}
+\sisetup{locale=FR}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+\usepackage{tikz}
+\usetikzlibrary{shapes.misc,calc,arrows.meta,positioning,fit,backgrounds}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{enumitem}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+\setlist{itemsep=1pt,topsep=3pt}
+
+% ---------- notations ----------
+\newcommand{\vect}[1]{\bm{#1}}
+\newcommand{\mat}[1]{\bm{#1}}
+\newcommand{\T}{^{\!\top}}
+\newcommand{\dt}[1]{\dot{#1}}
+\newcommand{\ddt}[1]{\ddot{#1}}
+\newcommand{\q}{\vect{q}}
+\newcommand{\Mm}{\mat{M}}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\fichier}[1]{\texttt{\detokenize{#1}}}
+
+\title{\textbf{L'outil de simulation du convoi articulé}\\[2mm]
+\large Modèles du véhicule et des actionneurs, pilote, lois de commande,\\
+génération de trajectoires et paramétrage}
+\author{Hugo Testaniere\\[1mm]\small Laboratoire Ampère -- Metacar / Kiwee}
+\date{\today\\[1mm]\small Document de travail (préparation du manuscrit de thèse)}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+% =====================================================================
+\section{Introduction}
+Ce document décrit de façon complète l'outil de simulation du convoi articulé développé pendant la thèse (page \fichier{simulation_convoi.html} et sa variante « modes dégradés » \fichier{simulation_degrade.html}). Il rassemble ce qui est dispersé dans le code et dans les notes précédentes : le modèle du véhicule, les modèles des actionneurs (articulations amorties, vérins hydrauliques, moteurs-roues), le pilote, les lois de commande, la génération des trajectoires, le paramétrage et les indicateurs de performance.
+
+Le formalisme (notations matricielles de Lagrange pour les véhicules articulés tous essieux braqués) suit~\cite{Li2024} ; pour la dynamique latérale des véhicules et des convois on peut consulter~\cite{Gillespie1992,Rajamani2012,Jujnovich2013}. Les dérivations mathématiques détaillées du modèle de Lagrange sont dans le rapport \emph{Modèle dynamique d'un convoi articulé} (\fichier{doc/rapport/modele_convoi.tex}) et la formulation hamiltonienne à ports dans \fichier{convoi_porthamiltonien.tex} ; elles ne sont pas reprises ici. Ce document décrit au contraire \emph{ce que l'outil calcule réellement} : les équations telles qu'elles sont implantées, avec les valeurs par défaut et les simplifications retenues. Chaque section renvoie au fichier source concerné (annexe~\ref{app:code}).
+
+\paragraph{Ce que fait l'outil.} À partir d'une configuration (nombre de portions $N$, vitesse, trajectoire, loi de commande des articulations, vectoring de couple, vérins, défauts éventuels), il intègre en boucle fermée le modèle dynamique du convoi suivant une trajectoire de référence, puis calcule des indicateurs (erreur de suivi de la tête et de la queue, plots touchés, amplification arrière, déport, efforts) et les affiche sous forme d'animation et de courbes.
+
+\paragraph{Conventions.} Toutes les grandeurs sont en unités SI (m, s, kg, rad, N, N$\cdot$m) sauf mention contraire (vitesses affichées en \si{km/h}, angles en degrés dans l'interface). Les repères sont directs ; $\theta_k$ est le cap de la portion $k$ dans le repère fixe, positif dans le sens trigonométrique, l'axe $y$ pointant à gauche du sens de marche initial.
+
+% =====================================================================
+\section{Architecture de l'outil}
+\subsection{Organisation du code}
+L'outil est une page HTML autonome (un seul fichier, sans dépendance réseau) générée par un script de construction à partir de modules JavaScript :
+
+\begin{center}\small
+\begin{tabular}{@{}lp{9.4cm}@{}}\toprule
+Module & Rôle\\\midrule
+\fichier{moteur.js} & modèle du convoi (\code{buildModel}, \code{dynamics}), intégrateur, trajectoires (\code{makePath}), pilote (\code{makePilot}), événements d'urgence, boucle fermée (\code{simulateClosed}), plots touchés\\
+\fichier{verin.js} & dynamique hydraulique des deux vérins par articulation, vannes proportionnelles, loi de commande par courant\\
+\fichier{couple.js} & courbes de couple maximal des moteurs-roues mesurées (traction, régénération)\\
+\fichier{rwa.js} & indicateurs d'amplification arrière (RWA) et de déport\\
+\fichier{faults.js} & catalogue de défauts, injection, scénarios aléatoires, évaluation\\
+\fichier{degrade.js, degrade_ui.html} & interface et campagnes de la page « modes dégradés »\\
+\fichier{gabarit_fermee.html} & interface (paramètres, animation, courbes), assemblage des options\\
+\fichier{construire.py} & concatène les modules et la table des gains optimisés ; produit les deux pages\\\bottomrule
+\end{tabular}
+\end{center}
+
+La page « nominale » et la page « modes dégradés » partagent le même moteur ; la seconde ajoute le panneau d'injection de défauts. Le moteur est un port JavaScript du code Python \fichier{modele.py}, lui-même issu du code MATLAB du dossier \fichier{modele/}.
+
+\subsection{Chaîne de calcul}
+La figure~\ref{fig:archi} résume le flux d'une simulation. Le bouton « Simuler » assemble un objet d'options \code{o} (lecture des champs de l'interface), puis appelle \code{simulateClosed(o)}, qui renvoie la suite d'images (positions des articulations, caps, efforts, pressions…), la trajectoire, les plots touchés, les événements et le statut de la simulation (\code{fin}, \code{diverge}, \code{nan}). L'interface calcule ensuite les indicateurs et dessine.
+
+\begin{figure}[H]\centering
+\begin{tikzpicture}[font=\small,node distance=6mm,
+ bx/.style={draw,rounded corners=2pt,align=center,fill=blue!6,minimum height=8mm,inner sep=3pt},
+ sm/.style={draw,rounded corners=2pt,align=center,fill=orange!10,minimum height=7mm,inner sep=2pt,font=\footnotesize},
+ ar/.style={-{Stealth[length=2.2mm]}}]
+ \node[bx] (ui) {Interface\\paramètres};
+ \node[bx,right=9mm of ui] (opt) {options \code{o}};
+ \node[sm,right=14mm of opt,yshift=11mm] (traj) {\code{makePath}\\trajectoire};
+ \node[sm,below=2mm of traj] (pil) {\code{makePilot}\\pilote $(\delta_0,F_d)$};
+ \node[sm,below=2mm of pil] (act) {actionneurs\\vérins, vectoring, défauts};
+ \node[sm,below=2mm of act] (dyn) {\code{dynamics}\\modèle de Lagrange, RK4};
+ \begin{scope}[on background layer]\node[draw,dashed,rounded corners,fit=(traj)(pil)(act)(dyn),inner sep=4pt,label={[font=\footnotesize]above:\code{simulateClosed}}] (box) {};\end{scope}
+ \node[bx,right=14mm of box] (fr) {images\\(positions, efforts)};
+ \node[bx,right=9mm of fr] (ind) {indicateurs\\animation, courbes};
+ \draw[ar] (ui)--(opt);\draw[ar] (opt)--(box);\draw[ar] (box)--(fr);\draw[ar] (fr)--(ind);
+ \draw[ar] (traj)--(pil);\draw[ar] (pil)--(act);\draw[ar] (act)--(dyn);
+ \draw[ar,dashed] (dyn.west) -- ++(-5mm,0) |- node[pos=.25,left,font=\scriptsize]{état} (pil.west);
+\end{tikzpicture}
+\caption{Chaîne de calcul d'une simulation en boucle fermée.}\label{fig:archi}
+\end{figure}
+
+\subsection{Reproductibilité}
+Les scénarios sont reproductibles : le circuit urbain aléatoire, le placement des événements d'urgence et les scénarios de défauts sont tirés par des générateurs pseudo-aléatoires à graine (\code{mulberry32} et un générateur congruentiel linéaire). Les principaux réglages peuvent être imposés par l'adresse de la page (fragment \code{\#slalom,V=20,C=3000}) : c'est ce qui sert pour les essais automatiques et la génération des tableaux du rapport. Les scripts d'optimisation (\fichier{doc/optimisation/}) appellent le même moteur, ce qui garantit que les tableaux de gains correspondent exactement à la page.
+
+% =====================================================================
+\section{Modèle du véhicule}
+\subsection{Géométrie et coordonnées généralisées}
+Le convoi comprend $N$ portions rigides ($n=N-1$ articulations) ; la portion $1$ est la tête, la portion $N$ la queue. Chaque portion $k$ est repérée par son cap $\theta_k$ et les vecteurs unitaires $\vect n_k=(\cos\theta_k,\sin\theta_k)\T$ (longitudinal) et $\vect u_k=(-\sin\theta_k,\cos\theta_k)\T$ (transversal). Les coordonnées généralisées sont
+\begin{equation}
+ \q=(x_1,\,y_1,\,\theta_1,\dots,\theta_N)\T\in\mathbb R^{N+2},
+\end{equation}
+où $(x_1,y_1)$ est la position de l'articulation $J_1$, point avant de la tête, qui coïncide avec le centre de l'essieu directeur $A_1$. Les points suivants se déduisent par
+\begin{equation}
+ \vect J_{k+1}=\vect J_k-l_{JJ,k}\,\vect n_k,\qquad
+ \vect G_k=\vect J_k-l_{JG,k}\,\vect n_k,\qquad
+ \vect A_k=\vect J_k-l_{JA,k}\,\vect n_k,
+\end{equation}
+avec $G_k$ le centre de gravité et $A_k$ le centre de l'essieu de la portion $k$ (figure~\ref{fig:geom}). Dans l'implantation, $l_{JJ,1}=L/2$, $l_{JJ,k}=L$ pour les portions intermédiaires, $l_{JG,k}=l_{JA,k}=L/2$ pour les portions intermédiaires, $l_{JG,1}=l_1$ et $l_{JA,1}=0$ pour la tête, et $l_{JG,N}=l_N$, $l_{JA,N}=L/2$ pour la queue.
+
+\begin{figure}[H]\centering
+\begin{tikzpicture}[x=1cm,y=1cm,font=\small,
+ por/.style={line width=9pt,line cap=round,gray!25},
+ art/.style={circle,draw,fill=white,inner sep=1.4pt,thick}]
+ \draw[por] (0,0)--(1.4,0);\draw[por] (2.2,0)--(4.8,0);\draw[por] (5.6,0)--(8.0,0);
+ \node[art,label=above:{$J_1=A_1$}] (j1) at (0,0) {};
+ \node[art,label=above:{$J_2$}] at (1.8,0) {};\node[art,label=above:{$J_3$}] at (5.2,0) {};
+ \fill[red!70!black] (0.55,0) circle (2pt) node[below=3pt]{$G_1$};
+ \fill[red!70!black] (3.5,0) circle (2pt) node[below=3pt]{$G_2$};
+ \fill[red!70!black] (6.8,0) circle (2pt) node[below=3pt]{$G_3$};
+ \draw[blue!60!black,thick,-{Stealth}] (0,0.9)--(-0.9,0.9) node[left]{marche};
+ \draw[<->] (0,-0.85)--(1.8,-0.85) node[midway,below]{\scriptsize $l_{JJ,1}$};
+ \draw[<->] (1.8,-0.85)--(5.2,-0.85) node[midway,below]{\scriptsize $l_{JJ,2}$};
+ \node at (4.3,1.0) {\scriptsize portions $k=2,\dots,N-1$ : $A_k$ au milieu de l'entraxe};
+\end{tikzpicture}
+\caption{Points caractéristiques du modèle (schéma pour $N=3$). La tête est à gauche, le véhicule avance vers la gauche.}\label{fig:geom}
+\end{figure}
+
+\paragraph{Paramètres par défaut.} Masses $M_1=\SI{300}{kg}$ (tête), $M_j=\SI{500}{kg}$ (portions intermédiaires), $M_n=\SI{300}{kg}$ (queue) ; inerties $I_1=\SI{170}{kg.m^2}$, $I_j=\SI{150}{kg.m^2}$, $I_n=\SI{100}{kg.m^2}$ ; longueur $L=\SI{1,8}{m}$, $l_1=\SI{0,6}{m}$, $l_n=\SI{0,3}{m}$. Le nombre de pneus par essieu est $n_P=2$ (têtes) et $n_P=4$ (portions intermédiaires) ; seuls les $n_B=2$ pneus de l'essieu de tête sont directeurs.
+
+\subsection{Cinématique : jacobiens}\label{sec:jac}
+Soit un point de la portion $k$ situé à la distance $\ell$ en arrière de l'articulation $J_k$ ($\ell=l_{JG,k}$ pour le centre de gravité $G_k$, $\ell=l_{JA,k}$ pour le centre d'essieu $A_k$) :
+\begin{equation}
+ \vect X_k(\ell)=\begin{pmatrix}x_1\\y_1\end{pmatrix}-\sum_{i=1}^{k-1}l_{JJ,i}\,\vect n_i-\ell\,\vect n_k .
+\end{equation}
+Avec $\vect u_i=\partial\vect n_i/\partial\theta_i=(-\sin\theta_i,\cos\theta_i)\T$, la vitesse et l'accélération s'écrivent
+\begin{align}
+ \dt{\vect X}_k&=\mat P_k\,\dt\q,\qquad
+ \mat P_k=\Big[\;\mat I_2\;\Big|\;-l_{1k}\vect u_1\;\cdots\;-l_{kk}\vect u_k\;\;\vect 0\cdots\vect 0\;\Big],\\
+ \ddt{\vect X}_k&=\mat P_k\,\ddt\q+\dt{\mat P}_k\dt\q,\qquad
+ \dt{\mat P}_k\dt\q=\sum_{i=1}^{k}l_{ik}\,\dt\theta_i^{\,2}\,\vect n_i ,
+\end{align}
+où $l_{ik}=l_{JJ,i}$ pour $i<k$ et $l_{kk}=\ell$. Le second terme est l'accélération centripète ; il contient toute la non-linéarité de la géométrie. Les matrices $\mat P_k$ (pour $G_k$) et $\mat P_{A,k}$ (pour $A_k$) ne diffèrent que par la dernière colonne ($l_{JG,k}$ contre $l_{JA,k}$).
+
+\subsection{Équations de Lagrange}\label{sec:lagrange}
+L'énergie cinétique du convoi est
+\begin{equation}
+ T=\tfrac12\sum_{k=1}^N m_k\,\|\dt{\vect G}_k\|^2+\tfrac12\sum_{k=1}^N I_k\,\dt\theta_k^2=\tfrac12\,\dt\q\T\Mm(\q)\,\dt\q,\qquad
+ \Mm=\sum_{k=1}^N m_k\,\mat P_k\T\mat P_k+\operatorname{diag}(0,0,I_1,\dots,I_N).
+\end{equation}
+Les équations de Lagrange $\dfrac{d}{dt}\dfrac{\partial T}{\partial\dt\q}-\dfrac{\partial T}{\partial\q}=\vect\tau$ donnent $\Mm\ddt\q+\dt{\Mm}\dt\q-\partial T/\partial\q=\vect\tau$. Pour des corps rigides plans dont les points se déduisent des $\theta_i$ par les formules ci-dessus, les termes $\dt{\mat P}_k\T\mat P_k\dt\q$ et $\partial T/\partial\q$ se compensent et il reste (c'est le principe de d'Alembert appliqué à chaque centre de gravité)
+\begin{equation}
+ \boxed{\;\Mm(\q)\,\ddt\q+\vect C(\q,\dt\q)=\vect\tau,\qquad
+ \vect C=\sum_{k=1}^N m_k\,\mat P_k\T\,\dt{\mat P}_k\dt\q\;}
+\end{equation}
+Les blocs de $\Mm$ et de $\vect C$ sont explicites. Avec $M_{\text{tot}}=\sum_km_k$ et $l_{ik}$ comme ci-dessus ($l_{kk}=l_{JG,k}$),
+\begin{align}
+ M_{xx}&=M_{yy}=M_{\text{tot}},\qquad M_{xy}=0,\\
+ M_{x\theta_i}&=\sin\theta_i\sum_{k\ge i}m_kl_{ik},\qquad M_{y\theta_i}=-\cos\theta_i\sum_{k\ge i}m_kl_{ik},\\
+ M_{\theta_i\theta_j}&=\cos(\theta_i-\theta_j)\sum_{k\ge\max(i,j)}m_k\,l_{ik}\,l_{jk}\;+\;\delta_{ij}\,I_i,
+\end{align}
+\begin{align}
+ C_x&=\sum_{k=1}^Nm_k\sum_{j\le k}l_{jk}\,\dt\theta_j^{\,2}\cos\theta_j,\qquad
+ C_y=\sum_{k=1}^Nm_k\sum_{j\le k}l_{jk}\,\dt\theta_j^{\,2}\sin\theta_j,\\
+ C_{\theta_i}&=\sum_{k\ge i}m_k\,l_{ik}\sum_{j\le k}l_{jk}\,\dt\theta_j^{\,2}\,\sin(\theta_i-\theta_j).
+\end{align}
+La matrice $\Mm$ est symétrique définie positive ; $C_{\theta_i}$ ne dépend que des \emph{différences} de caps, ce qui exprime l'invariance du système par rotation d'ensemble. Ces expressions sont celles du rapport de modélisation, ici sous forme développée (elles sont évaluées numériquement en \code{dynamics} par produits de jacobiens).
+
+\paragraph{Efforts généralisés (principe des travaux virtuels).} Une force $\vect F$ appliquée au point $A_k$ travaille dans le déplacement virtuel $\delta\q$ de $\vect F\T\mat P_{A,k}\delta\q$ ; un moment pur $M$ sur la portion $k$ travaille de $M\,\delta\theta_k$. D'où
+\begin{equation}
+ \vect\tau=\sum_{k=1}^{N}\mat P_{A,k}\T\big(F_{n,k}\vect n_k+F_{u,k}\vect u_k\big)
+ +\sum_{k=1}^{n}M_{a,k}\,(\vect e_{\theta_k}-\vect e_{\theta_{k+1}})
+ +\sum_{k}M_{z,k}\,\vect e_{\theta_k}
+ +\sum_{k=1}^N m_k\,g_y\,\mat P_{k,y}\T,
+\end{equation}
+les quatre termes étant respectivement les efforts de contact (pneus et longitudinaux), le couple de rappel des articulations (§\ref{sec:art}), le moment de vectoring (§\ref{sec:vec}) et la pesanteur latérale en dévers ($\mat P_{k,y}$ : deuxième ligne de $\mat P_k$).
+
+\paragraph{Articulations bloquées.} Lorsque certaines articulations sont verrouillées ($\theta_{k+1}=\theta_k$), les coordonnées sont reliées par une matrice constante $\mat T$ telle que $\q=\mat T\q_r$ ; le système réduit est
+\begin{equation}
+ \mat T\T\Mm\,\mat T\;\ddt\q_r=\mat T\T(\vect\tau-\vect C),
+\end{equation}
+ce qui est exactement la fusion des lignes et colonnes réalisée par la table \code{map}. Le couple de maintien de l'articulation bloquée est déduit a posteriori.
+
+\paragraph{Forme d'état.} Avec $\vect X=(\q,\dt\q)$,
+\begin{equation}
+ \dt{\vect X}=\begin{pmatrix}\dt\q\\ \Mm^{-1}(\q)\,\big(\vect\tau(\vect X,t)-\vect C(\vect X)\big)\end{pmatrix},
+\end{equation}
+intégrée par Runge--Kutta d'ordre~4 (§\ref{sec:integ}). Le modèle linéarisé autour de la marche en ligne droite ($\theta_i\approx0$, $\dt\theta_i$ petits, $\delta_0$ petit) s'obtient en posant $\Mm=\Mm(0)$, $\vect C=0$ et $\sin\beta\approx\beta$ ; son étude (valeurs propres en fonction de $c$ et $v$) est dans les rapports de stabilité.
+
+\subsection{Pneus}
+Pour chaque essieu $k$, on calcule la vitesse du centre d'essieu $\vect A_k$ dans le repère de la portion, $(v_{x,k},v_{y,k})$, et l'angle de dérive du centre d'essieu
+\begin{equation}
+ \beta_k=\operatorname{atan2}(v_{y,k},v_{x,k}).
+\end{equation}
+Le braquage vaut $\delta_1=\delta_0$ (commande du pilote) pour l'essieu de tête et $\delta_k=0$ pour les autres. Deux lois de pneu sont disponibles (la seconde est une saturation en $\tanh$ de type « brosse », voir~\cite{Pacejka2012,Kiencke2005}) :
+
+\paragraph{Loi linéaire.} Avec $K_t=\SI{13600}{N/rad}$ par pneu,
+\begin{equation}
+ F_k=K_t\big[n_B(\delta_k-\beta_k)-(n_P-n_B)\beta_k\big].
+\end{equation}
+
+\paragraph{Loi saturée (réglage par défaut).} Chaque pneu est limité par l'adhérence $\mu F_z$ avec $F_z=m_kg/n_P$ :
+\begin{equation}
+ F_k=F_B\tanh\!\Big(\frac{K_t\,n_B(\delta_k-\beta_k)}{F_B}\Big)+F_N\tanh\!\Big(\frac{-K_t\,(n_P-n_B)\,\beta_k}{F_N}\Big),
+\end{equation}
+avec $F_B=n_B\,\mu F_z$ et $F_N=(n_P-n_B)\,\mu F_z$. Le coefficient d'adhérence par défaut est $\mu=0{,}8$ ; on peut imposer à la place un effort latéral maximal par pneu $F_{y,\max}$ (champ « effort latéral maximal », $\mu_{\text{eff}}=F_{y,\max}/F_z$). Les défauts d'adhérence (flaque, perte d'adhérence totale ou d'un seul côté) modifient $\mu$ par essieu et, pour l'adhérence d'un seul côté, calculent l'effort comme la moyenne des efforts du côté gauche et du côté droit avec leurs $\mu$ respectifs. Une crevaison multiplie $F_k$ par la fraction de pneus restants.
+
+\paragraph{Passage au repère de la portion.} Avec $F_l$ l'effort longitudinal appliqué à l'essieu (§\ref{sec:long}) et $\delta=\delta_k$,
+\begin{equation}
+ F_n=\cos\delta\,F_l-\sin\delta\,F_k,\qquad F_u=\sin\delta\,F_l+\cos\delta\,F_k,
+\end{equation}
+et la contribution aux efforts généralisés est $F_n\,\vect n_k\T\mat P_{A,k}+F_u\,\vect u_k\T\mat P_{A,k}$.
+
+\subsection{Efforts longitudinaux et résistance au roulement}\label{sec:long}
+Le pilote demande un effort longitudinal total $F_d$ (§\ref{sec:pilot_long}) qui est \emph{réparti également} sur les $N$ portions : $F_{l,k}=F_d/N$, appliqué au centre d'essieu. Cet effort est multiplié par la fraction de moteurs-roues en service sur la portion $k$ (modes dégradés), et mis à zéro en traction si la portion n'a plus de traction (batterie vide). La résistance au roulement est incluse dans $F_d$ sous la forme
+\begin{equation}
+ F_{rr}=-C_{rr}\,M_{\text{tot}}\,g\,\tanh(v/\SI{0,3}{m/s}),\qquad C_{rr}=0{,}01,
+\end{equation}
+ce qui évite la discontinuité à l'arrêt. L'effort demandé aux moteurs (sans la résistance) est noté $F_c$.
+
+\subsection{Dévers}
+Pour l'essai en dévers, la composante latérale de la pesanteur $g_y=-s\,g\sin\alpha$ ($\alpha$ pente transversale, $s=\pm1$ le sens) est appliquée au centre de gravité de chaque portion : $\vect\tau_{\text{pes}}=\sum_k m_k\,g_y\,\mat P_{k,y}\T$ où $\mat P_{k,y}$ est la ligne $y$ du jacobien $\mat P_k$.
+
+\subsection{Articulation 1 bloquée}
+Dans le réglage par défaut la première articulation est bloquée ($\theta_2=\theta_1$) : le véhicule de tête est alors un seul corps rigide. Le blocage est imposé en réduisant le système : les coordonnées liées sont fusionnées (matrice de passage \code{map}) et le système réduit $\Mm_r\ddt\q_r=\vect f_r$ est résolu. Cette méthode permet aussi de bloquer des articulations en cours de simulation (grippage, §\ref{sec:def}) : à l'instant du blocage la vitesse de lacet commune est la moyenne des deux vitesses.
+
+\subsection{Intégration numérique}\label{sec:integ}
+L'intégration est un Runge--Kutta d'ordre 4 à pas fixe, $\Delta t=\SI{2}{ms}$ ($\SI{1}{ms}$ en dessous de \SI{10}{km/h}), $\SI{0,5}{ms}$ lorsque la dynamique des vérins est activée. L'état stocké est $\vect X=(\q,\dt\q)$. Les images conservées pour l'affichage et les indicateurs sont enregistrées toutes les \SI{30}{ms}. La simulation s'arrête (statut \code{fin}) lorsque la tête atteint l'avant-dernier point de la trajectoire, ou (\code{diverge}) si l'écart de la queue dépasse \SI{12}{m} ou si un angle relatif dépasse $2{,}6$\,rad, ou (\code{nan}) en cas de valeur non finie. La durée maximale est fixée automatiquement à partir de la longueur de la trajectoire et de la vitesse (plafonnée à \SI{150}{s}, \SI{600}{s} en circuit urbain), ou imposée par l'utilisateur.
+
+% =====================================================================
+\section{Modèles des actionneurs et lois de commande}
+\subsection{Articulations : amortisseur idéal}\label{sec:art}
+Le couple d'amortissement de l'articulation $k$ ($k=1,\dots,n$) entre les portions $k$ et $k+1$ est
+\begin{equation}
+ M_{a,k}=g_v\,g_R\;c_k\,(\dt\theta_{k+1}-\dt\theta_k),\qquad M_{a,k}\in[-M_{\max},M_{\max}],
+\end{equation}
+appliqué $+M_{a,k}$ sur $\theta_k$ et $-M_{a,k}$ sur $\theta_{k+1}$, avec $M_{\max}=\SI{2500}{N.m}$ par défaut (saturation optionnelle). Le gain $c_k$ peut être uniforme ou réparti (§\ref{sec:repart}). Deux fonctions de blocage atténuent la commande dans les cas où elle n'est pas physique :
+\begin{itemize}
+ \item $g_v\in[0,1]$ : montée de la commande entre $v_g$ et $1{,}4\,v_g$ (la commande de vannes n'est active qu'au-dessus d'une vitesse minimale, réglable, $0$ par défaut) ;
+ \item $g_R\in[0,1]$ : annulation de la commande lorsque la vitesse de tige est trop faible (en dessous de $v_{\text{tige,min}}$, \SI{3}{mm/s} par défaut, montée jusqu'à $2\,v_{\text{tige,min}}$), la vitesse de tige étant évaluée avec le bras de levier moyen \SI{0,147}{m}.
+\end{itemize}
+
+\paragraph{Répartition de $c$ le long du convoi.}\label{sec:repart}
+Le réglage « $c$ moyen » est converti par $c=10^5\,(s_c/1000)^2$ à partir du curseur $s_c$ (échelle quadratique, $0$ désigne l'absence d'amortissement). Quatre lois de répartition des poids $g_k$ sont proposées, normalisées pour que la moyenne des $c_k$ reste égale à $c$ :
+\begin{align}
+ \text{linéaire :}&\quad g_k=\max\big(0,1+s\,(1-2x_k)\big),\\
+ \text{polynomiale :}&\quad g_k=\varepsilon+(1-\varepsilon)\,u_k^{\,p},\\
+ \text{gaussienne :}&\quad g_k=\varepsilon+(1-\varepsilon)\exp\!\Big(-\tfrac12\Big(\tfrac{x_k-x_0}{\sigma}\Big)^2\Big),\\
+ c_k&=c\,\frac{g_k}{\frac1n\sum_j g_j},\qquad x_k=\tfrac{k-1}{n-1},
+\end{align}
+avec $u_k=x_k$ (renforcement vers l'arrière) ou $u_k=1-x_k$ (vers l'avant). Les paramètres par défaut sont $p=3$, $x_0=0{,}5$, $\sigma=0{,}2$, $\varepsilon=0{,}1$, $s=0$ (répartition uniforme).
+
+\subsection{Vérins hydrauliques}\label{sec:verins}
+Chaque articulation est équipée de deux vérins hydrauliques en V (côté gauche $g$, côté droit $d$), dont les vannes proportionnelles (SP08-22 de l'étude) pilotent l'amortissement. Le module \fichier{verin.js} remplace l'amortisseur idéal par ce modèle lorsque la case « Dynamique des vérins » est cochée. Le modèle suit la démarche classique de l'hydraulique de puissance~\cite{Merritt1967,Watton2009,Manring2005} : continuité du débit avec compressibilité de l'huile, loi d'orifice, accumulateur polytropique ; il a été confronté à des essais (§\ref{sec:verif}). La figure~\ref{fig:hydro} rappelle le schéma et les notations.
+
+\begin{figure}[H]\centering
+\begin{tikzpicture}[font=\small,x=1cm,y=1cm,
+ ar/.style={-{Stealth[length=2mm]}},
+ cb/.style={draw,rounded corners=1pt,minimum height=7mm,align=center,inner sep=2pt}]
+ \node[cb,minimum width=22mm] (c1) at (0,0) {chambre 1 (fond)\\$P_1,\ V_1,\ S_p$};
+ \node[cb,minimum width=22mm,right=16mm of c1] (c2) {chambre 2 (tige)\\$P_2,\ V_2,\ S_a$};
+ \node[cb,minimum width=18mm,below=9mm of $(c1)!0.5!(c2)$] (nd) {n\oe ud\\$P_2$};
+ \node[cb,minimum width=20mm,right=14mm of nd,fill=orange!10] (ac) {accumulateur\\$P_0,V_0,\gamma$};
+ \draw[ar] (c1.south) |- node[pos=.25,left,font=\scriptsize]{$Q_v,Q_c,Q_r$} (nd.west);
+ \draw[ar] (c2.south) |- (nd.east);
+ \draw (nd.east) -- (ac.west);
+ \draw[<->] (-2.2,0.6)--(-0.9,0.6) node[midway,above,font=\scriptsize]{$\dt\lambda$};
+ \node[font=\scriptsize,above=5mm of c1,xshift=10mm]{vanne $K(I)$ + clapet + limiteur entre chambre 1 et n\oe ud};
+\end{tikzpicture}
+\caption{Schéma de principe d'un vérin : la chambre 1 est reliée au n\oe ud par la vanne proportionnelle (compression), le clapet anti-retour (extension) et le limiteur de pression ; la chambre 2 et l'accumulateur partagent la pression $P_2$.}\label{fig:hydro}
+\end{figure}
+
+\subsubsection*{(a) Géométrie et bras de levier}
+Pour l'angle d'articulation $\psi=\theta_{k+1}-\theta_k$, les deux vérins ont pour angles de calage $a_g=\varphi-\psi$ et $a_d=\varphi+\psi$. Le vecteur entre les deux ancrages d'un vérin a pour composantes
+\begin{equation}
+ u_x=h_1+R_1\cos a,\qquad u_y=\tfrac{L_2}{2}-R_1\sin a,\qquad \lambda=\sqrt{u_x^2+u_y^2},
+\end{equation}
+avec $R_1=\SI{0,15}{m}$ le rayon des bras, $L_2=\SI{0,9}{m}$ l'entraxe des ancrages avant, $\varphi=\SI{20}{\degree}$ et $h_1=\sqrt{\lambda_0^2-\big(\tfrac{L_2}2-R_1\sin\varphi\big)^2}-R_1\cos\varphi$ fixé par la longueur au repos $\lambda_0=\SI{0,465}{m}$. En dérivant $\lambda$ par rapport à $a$ :
+\begin{equation}
+ \frac{d\lambda}{da}=-\frac{R_1\,(u_x\sin a+u_y\cos a)}{\lambda}=-R_1\sin(a+\vartheta)=-R_1S,\qquad \vartheta=\operatorname{atan2}(u_y,u_x),
+\end{equation}
+d'où $\dfrac{d\lambda_g}{d\psi}=+R_1S_g$ et $\dfrac{d\lambda_d}{d\psi}=-R_1S_d$, et la vitesse de tige $\dt\lambda_{g,d}=\pm R_1S_{g,d}\,\dt\psi$. Les longueurs $\lambda_{g,d}$ ne sont donc pas des fonctions sinusoïdales de $\psi$ : le bras de levier $R_1S$ varie avec l'angle.
+
+\subsubsection*{(b) Continuité du débit dans les chambres}
+Pour un volume d'huile $V$ à la pression $P$, de module de compressibilité $B$, $\dt P=\dfrac{B}{V}\big(Q_{\text{in}}-\dt V\big)$. La chambre côté fond a le volume $V_1=V_{01}+\Delta\lambda\,S_p$ et la chambre côté tige $V_2=V_{02}-\Delta\lambda\,S_a$, avec $\Delta\lambda=\lambda-\lambda_0$, $S_p=\pi D_p^2/4$, $S_t=\pi D_t^2/4$, $S_a=S_p-S_t$ et $V_{01}=(\SI{1}{mm}+\Delta_c/2)S_p$, $V_{02}=(\SI{1}{mm}+\Delta_c/2)S_a$ pour une course totale $\Delta_c=\SI{0,2}{m}$. Avec $Q$ le débit entrant dans la chambre 1 (positif de l'accumulateur vers la chambre 1) :
+\begin{equation}
+ \dt P_1=\frac{B}{V_1}\big(Q-\dt\lambda\,S_p\big).
+\end{equation}
+La chambre 2 est reliée au n\oe ud et à l'accumulateur à gaz, qui partagent la pression $P_2$. Le gaz suit la loi polytropique $P\,V_g^{\gamma}=P_0V_0^{\gamma}$ ($\gamma=1{,}4$), soit $V_g=V_0(P_0/P_2)^{1/\gamma}$ (l'échange thermique, dont la constante de temps est discutée dans~\cite{Pourmovahed1990}, est négligé) et un volume d'huile $V_0-V_g$ dans l'accumulateur. La conservation de l'huile du n\oe ud donne, en négligeant le facteur $1+P/B\simeq1$ (moins de \SI{0,02}{\%} à \SI{200}{bar}),
+\begin{equation}
+ \Big(\frac{V_2}{B}+\alpha_a\Big)\dt P_2=\dt\lambda\,S_a-Q,\qquad
+ \alpha_a=-\frac{dV_g}{dP_2}=\frac{V_0}{\gamma}\,P_0^{1/\gamma}\,P_2^{-1-1/\gamma},
+\end{equation}
+c'est-à-dire $\dt P_2=\dfrac{B}{V_2\,(1+B\alpha_a/V_2)}\,(\dt\lambda\,S_a-Q)$. Le coefficient $\alpha_a$ est la \emph{compliance} de l'accumulateur ; il rend $P_2$ beaucoup moins raide que $P_1$.
+
+\paragraph{Pression d'équilibre.} À $\psi=0$ (tige à mi-course), la pression de repos $P_{eq}$ est déduite de la pression de gonflage $P_c$ (tige complètement sortie, \SI{15}{bar}) par conservation de l'huile : en notant $w(P,V_1,V_2)=V_1(1+P/B)+V_2(1+P/B)+V_0-V_0(P_0/P)^{1/\gamma}$, $P_{eq}$ est la racine de $w(P_{eq},V_{01},V_{02})=w(P_c,V_{1e},V_{2e})$ avec $V_{1e}=V_{01}+\tfrac{\Delta_c}2S_p$, $V_{2e}=V_{02}-\tfrac{\Delta_c}2S_a$ (méthode de Newton). Pour les paramètres par défaut, $P_{eq}\simeq\SI{23}{bar}$.
+
+\subsubsection*{(c) Débits : vanne, clapet, limiteur}
+Le débit entrant dans la chambre 1 est la somme de trois termes, avec $\Delta P=P_2-P_1$ (positif en extension) :
+\begin{align}
+ Q_v&=-K\sqrt{\tfrac{2|\Delta P|}{\rho}}\;\tanh\!\Big(\tfrac{|\Delta P|}{\Delta_\epsilon}\Big)\;\tfrac12\Big(1-\tanh\tfrac{\Delta P}{\Delta_\epsilon}\Big)&&\text{vanne (compression)},\\
+ Q_c&=K_c\sqrt{\tfrac{2}{\rho}\,\big(\Delta P-P_{\text{cl}}\big)^{+}}&&\text{clapet anti-retour (extension)},\\
+ Q_r&=-K_r\sqrt{\tfrac{2}{\rho}\,\big(P_1-P_{\lim}\big)^{+}}&&\text{limiteur de pression},
+\end{align}
+avec $\rho=\SI{860}{kg/m^3}$, $K_c=\SI{3,87}{mm^2}$, $P_{\text{cl}}=\SI{0,52}{bar}$, $K_r=\SI{20}{mm^2}$, $P_{\lim}=\SI{200}{bar}$, $\Delta_\epsilon=\SI{1}{kPa}$ (lissage évitant la discontinuité en $\Delta P=0$). Ce sont des lois d'orifice de Bernoulli $Q=C_dA\sqrt{2\Delta P/\rho}$ où $K=C_dA$ est la section effective. $Q=Q_v+Q_c+Q_r$. La puissance dissipée dans la vanne est $\mathcal P_d=-Q_v\,|\Delta P|\ge0$.
+
+\paragraph{Section de la vanne.} $K$ est donnée en fonction du courant $I$ par la table constructeur (28 points de $K(I)$, figure~\ref{fig:vanne}), multipliée par un facteur réglable $K_s$ (l'essai montre $K_s\approx2$ à $3$, §\ref{sec:verif}). Pour inverser la loi, la table est ajustée par $K\simeq k\,(I-I_0)$ au sens des moindres carrés sur $\ln K$ pour $I\ge\SI{0,45}{A}$ : $k\simeq\SI{4,64}{mm^2/A}$ et $I_0\simeq\SI{0,54}{A}$ pour les paramètres par défaut. L'ouverture suit un second ordre
+\begin{equation}
+ \ddt K=\omega_n^2\,(K_c^\star-K)-2\zeta\omega_n\,\dt K,\qquad K_c^\star=K_s\,K(I),\quad \omega_n=\SI{20}{rad/s},\ \zeta=0{,}9,
+\end{equation}
+dont la constante de temps ($\approx\SI{50}{ms}$) limite la bande passante de la commande.
+
+
+\begin{figure}[H]\centering
+\begin{tikzpicture}
+\begin{axis}[width=0.46\linewidth,height=5.2cm,xlabel={courant $I$ (A)},ylabel={section $K$ (mm$^2$)},grid=both,ymode=log,title={\small table constructeur}]
+\addplot[blue!60!black,thick,mark=*,mark size=1pt] table[x=I,y=K] {data/vanne.dat};
+\end{axis}
+\end{tikzpicture}\hfill
+\begin{tikzpicture}
+\begin{axis}[width=0.46\linewidth,height=5.2cm,xlabel={vitesse (km/h)},ylabel={couple moteur max (N$\cdot$m)},grid=both,legend style={font=\scriptsize,at={(0.97,0.97)},anchor=north east},title={\small moteurs-roues (essais du 29/01/2026)}]
+\addplot[red!70!black,thick,mark=*,mark size=1pt] table[x=v,y=trac] {data/couple.dat};
+\addplot[green!50!black,thick,mark=square*,mark size=1pt] table[x=v,y=reg100] {data/couple.dat};
+\addplot[orange!80!black,thick,dashed,mark=triangle*,mark size=1pt] table[x=v,y=reg50] {data/couple.dat};
+\legend{traction,régén. 100\,A,régén. 50\,A}
+\end{axis}
+\end{tikzpicture}
+\caption{À gauche, section de la vanne en fonction du courant (table constructeur). À droite, couple maximal d'un moteur-roue en fonction de la vitesse : traction et régénération pour deux courants.}\label{fig:vanne}
+\end{figure}
+
+\subsubsection*{(d) Effort, couple d'articulation, énergie}
+Chaque vérin fournit l'effort axial $F_i=S_pP_{1,i}-S_aP_{2,i}=S_p(P_1-P_2)+S_tP_2$ (la tige est poussée vers l'extérieur par la pression de nœud sur sa section $S_t$). Par le principe des travaux virtuels, le travail des vérins pour un déplacement $\delta\psi$ est $\sum_iF_i\,\delta\lambda_i=R_1(F_gS_g-F_dS_d)\,\delta\psi$. Le couple appliqué à l'articulation (convention du modèle : $+M_a$ sur $\theta_k$, $-M_a$ sur $\theta_{k+1}$, positif si $\dt\psi>0$) est donc
+\begin{equation}
+ M_a=R_1\big(F_dS_d-F_gS_g\big).
+\end{equation}
+Au repos ($\dt\lambda=0$, $P_1=P_2=P_{eq}$ pour les deux vérins) il reste le terme $R_1P_{eq}S_t(S_d-S_g)$, nul à $\psi=0$ par symétrie. Le bilan d'énergie de l'articulation est $\dt E_{\text{vérins}}=-M_a\dt\psi$ moins les dissipations de vanne, clapet et limiteur : le système est dissipatif, ce qui explique le choix de ce modèle pour l'amortissement.
+
+\subsubsection*{(e) Loi de commande : courant de la vanne}
+L'objectif est que $M_a$ suive le couple demandé $M_d=c_k\,\dt\psi\,g_v$ (saturé à $\pm M_{\max}$). On commande le vérin qui comprime ($\dt\psi>0$ : vérin droit $p=d$, sinon $p=g$) ; l'autre vérin (extension, par le clapet) est laissé ouvert à $I_{\max}$. De $M_a=R_1(F_dS_d-F_gS_g)$ on déduit l'effort de consigne du vérin pilote :
+\begin{equation}
+ F_p^\star=\frac{|M_d|+R_1\,F_{\text{opp}}\,S_{\text{opp}}}{R_1\,S_{\text{pil}}},
+\end{equation}
+où « pil » désigne le vérin pilote et « opp » l'autre vérin ($S_{\text{pil}}$, $S_{\text{opp}}$ : facteurs du bras de levier $S$ du §(a), à ne pas confondre avec la section $S_p$ du piston). Une correction PI sur l'effort mesuré, $F_p^\star\leftarrow F_p^\star+K_pe+K_i\!\int e\,dt$ avec $e=F_p^\star-F_p$ ($K_p=0{,}5$, $K_i=\SI{5}{s^{-1}}$, intégrale bornée à $\pm2\cdot10^4$), compense les erreurs de modèle, et le limiteur impose $F_p^\star\le S_pP_{\lim}-S_aP_2$. Le saut de pression nécessaire est
+\begin{equation}
+ \Delta P^\star=\frac{F_p^\star-S_tP_2}{S_p}\;\ge\;\SI{0,1}{bar}.
+\end{equation}
+En régime de compression, l'équation d'orifice $Q=S_p\,\dt\lambda$ donne $\Delta P=\dfrac{\rho\,S_p^2\,\dt\lambda^2}{2K^2}$. Avec $K=k(I-I_0)$ :
+\begin{equation}
+ \Delta P=\frac{\alpha\,\dt\lambda^2}{(I-I_0)^2},\quad\alpha=\frac{\rho S_p^2}{2k^2}\quad\Longrightarrow\quad
+ \boxed{\,I=I_0+|\dt\lambda|\sqrt{\frac{\alpha}{\Delta P^\star}}\,}
+\end{equation}
+saturé entre $I_{\min}=\SI{0,394}{A}$ et $I_{\max}=\SI{1,144}{A}$ ($\alpha\simeq1{,}3\cdot10^{7}$ Pa$\cdot$s$^2\cdot$m$^{-2}\cdot$A$^2$ pour $D_p=\SI{32}{mm}$). Quand la vitesse de tige est inférieure au seuil $v_{\text{tige,min}}$ la vanne est rouverte progressivement (le courant tend vers $I_{\max}$), faute de pouvoir réguler un débit nul. L'effet est donc un amortisseur non linéaire (quadratique en vitesse à courant constant) \emph{linéarisé} en $c_k\dt\psi$ par la commande en $I$ ; la commande d'un tel amortisseur semi-actif à orifice est classique~\cite{Merritt1967}.
+
+\subsubsection*{(f) Estimation de la pression $P_2$}
+En pratique seule la pression $P_1$ du fond est mesurée. $P_2$ est reconstruite par conservation de l'huile du circuit fermé : avec $w_1=V_1(1+P_1/B)$ et $w_2=V_2(1+P_2/B)+V_0-V_0(P_0/P_2)^{1/\gamma}$, la continuité donne $\dt w_1+\dt w_2=\dt\lambda\,F/B$ (en sommant les équations de chaque côté, le débit $Q$ s'élimine), d'où
+\begin{equation}
+ w_1+w_2-\int_0^t\frac{\dt\lambda\,F_e}{B}\,d\tau=\text{cste}=W_{\text{tot}},\qquad
+ V_2(1+\tfrac{P_2}{B})+V_0-V_0\Big(\tfrac{P_0}{P_2}\Big)^{1/\gamma}=W_{\text{tot}}+\!\int\!\tfrac{\dt\lambda F_e}{B}-V_1(1+\tfrac{P_1^m}B),
+\end{equation}
+où $F_e=S_pP_1^m-S_aP_2^e$ est l'effort estimé et $P_1^m$ la pression mesurée. L'équation en $P_2$ est résolue par Newton (4 itérations par pas). Un défaut du capteur de pression (valeur nulle) fausse $P_1^m$ et donc $P_2^e$, $F$ et le courant.
+
+\subsubsection*{(g) Intégration}
+Le système $(P_1,P_2,K,\dt K)$ est raide (module de compressibilité élevé, volumes faibles). Il est intégré par un pas \emph{linéairement implicite} de Rosenbrock--Euler~\cite{Hairer1996} : avec $\vect y=(P_1,P_2)$, $\vect f(\vect y)$ le second membre et $\mat J=\partial\vect f/\partial\vect y$ évalué par différences finies,
+\begin{equation}
+ \big(\mat I-h\mat J\big)\,\Delta\vect y=h\,\vect f(\vect y_n),\qquad\vect y_{n+1}=\vect y_n+\Delta\vect y.
+\end{equation}
+Chaque pas de simulation de \SI{0,5}{ms} est subdivisé en $4$ sous-pas, avec $\psi$ et $\dt\psi$ interpolés linéairement ; la vanne du second ordre est intégrée à part par Euler explicite. Les paramètres par défaut sont regroupés dans le tableau du §\ref{sec:param_verin}.
+
+\subsection{Vectoring de couple (moteurs-roues)}\label{sec:vec}
+Le vectoring crée un moment de lacet sur chaque portion, sauf la tête (et, lorsque la première articulation est bloquée, sauf la portion qui lui est solidaire), par différence de couples entre les roues gauche et droite d'un essieu. La loi, décentralisée, n'utilise que les mesures locales de la portion :
+\begin{align}
+ w^\star_k&=\frac{v_{x,k}}{l_{JA,k}}\,\sin\psi_k,\qquad \psi_k=\theta_{k-1}-\theta_k,\\
+ M_{z,k}&=g_{vec}(v)\,I_k\,\big[k_\omega\,(w^\star_k-\dt\theta_k)+k_d\,\dt\psi_k\big],
+\end{align}
+avec $w^\star_k$ le lacet cinématique de référence, $k_\omega=k_d=\SI{10}{s^{-1}}$ et $g_{vec}$ une activation progressive au-dessus d'une vitesse minimale (\SI{10}{km/h} par défaut, montée jusqu'à $1{,}4$ fois cette valeur). Le principe (moment de lacet direct par différence de couples) est celui du contrôle de lacet direct~\cite{Shibahata1993,Hori2004,DeNovellis2014}. L'allocation aux roues se fait avec la demi-voie $e=\SI{0,46}{m}$ :
+\begin{enumerate}
+ \item la force différentielle demandée est $m=|M_{z,k}|/e$ ;
+ \item la \emph{régénération} de la roue du côté vers lequel tourne la portion est utilisée en priorité, jusqu'à $F_B=\min\big(n_wT_{\text{reg}}(v)/r_{\text{eff}},\;n_w F_{\text{fr}}\big)-\max(0,-c_{wl})$ ;
+ \item si cela ne suffit pas, la roue du côté opposé passe en traction pour compléter : $F_T=\min\big(n_wT_{\text{trac}}(v)/r_{\text{eff}},\;n_wF_{\text{fr}}\big)-\max(0,c_{wl})$ ;
+ \item le moment appliqué est $M_k=\operatorname{sgn}(M_{z,k})\,e\,(a+b)$ et l'effort longitudinal net $b-a$ s'ajoute à $F_{l,k}$.
+\end{enumerate}
+Dans ces expressions, $F_{\text{fr}}=\sqrt{(\mu F_{z})^2-F_{y}^2}$ est la limite du cercle de frottement (l'effort latéral du pneu consomme une part de l'adhérence), $c_{wl}$ est l'effort moteur déjà utilisé par la régulation de vitesse (par roue), et $T_{\text{trac}},T_{\text{reg}}$ sont les couples maximaux mesurés (figure~\ref{fig:vanne}, interpolation linéaire en $v$, décroissance linéaire jusqu'à zéro sur \SI{40}{km/h} au-delà de la plage d'essai). Le vectoring \emph{ne dispose donc que de la capacité restante} des moteurs et \emph{n'utilise jamais le freinage mécanique}. Le rayon de roue est $r_{\text{eff}}=\SI{0,23}{m}$.
+
+\paragraph{Défauts moteurs.} Une roue en panne ne fournit plus rien ($F_B$ ou $F_T$ mis à zéro) ; un couple bloqué ou un frein traînant introduit une force parasite et un moment de lacet $e\,(F_{R}-F_{L})$.
+
+\subsection{Récupération d'énergie et freinage}
+Le pilote demande des décélérations. Deux régimes sont distingués :
+\begin{itemize}
+ \item \textbf{lever de pédale} : si le conducteur lève le pied, ou lorsque la décélération demandée est inférieure à une fraction $p\%$ (par défaut $20\,\%$) de la régénération maximale à la vitesse courante, le freinage est entièrement récupératif : $F_{\text{lift}}=-\dfrac{p}{100}\,\dfrac{n_{\text{mot}}\,T_{\text{reg}}(v)}{r_{\text{eff}}}$, avec $n_{\text{mot}}=2(N-1)$ moteurs-roues ;
+ \item \textbf{freinage} : au-delà de cette limite, la pédale de frein est enfoncée et \emph{tout} le freinage est mécanique ; la régénération n'intervient plus.
+\end{itemize}
+Le conducteur anticipe : il lève le pied environ \SI{3}{s} avant une zone de freinage (virage à venir dans le profil de vitesse, début de freinage programmé). Si la batterie est pleine (défaut), la régénération est interdite et le freinage devient mécanique.
+
+% =====================================================================
+\section{Le pilote}
+\subsection{Guidage latéral (loi de Stanley)}\label{sec:stanley}
+Le pilote reproduit un conducteur qui guide l'essieu de tête sur la trajectoire de référence $\mathcal C$ échantillonnée tous les $\Delta s=\SI{5}{cm}$. À chaque pas on repère le point le plus proche $j$ de la trajectoire (recherche monotone vers l'avant, sans retour), on calcule l'écart latéral signé de $J_1$,
+\begin{equation}
+ e=(\vect J_1-\vect c_j)\cdot\vect u_{\text{ref},j}
+\end{equation}
+($\vect u_{\text{ref}}$ normale à gauche de la trajectoire) et l'écart de cap $\tilde\theta=\psi_{\text{ref},j}-\theta_1$ (ramené dans $]-\pi,\pi]$). Le braquage de la tête est
+\begin{equation}
+ \delta_0=\operatorname{sat}_{\pm35^\circ}\!\Big(\tilde\theta+\arctan\frac{-g\,e}{1+\max(v,0)}\Big),
+\end{equation}
+avec $g$ le « gain du pilote sur la direction » (curseur de \num{0,3} à \num{3}, \num{1} par défaut) et $v$ la vitesse longitudinale de la tête. C'est la loi de Stanley~\cite{Thrun2006,Hoffmann2007} appliquée à l'essieu directeur, avec un gain de correction latérale sans dimension. Elle est utilisée telle quelle pour toutes les trajectoires. Le moteur sait aussi y injecter un biais latéral, un biais de cap, une perte du guidage, une limitation ou un blocage du braquage ; ces défauts ne sont pas proposés dans le catalogue actuel de la page (§\ref{sec:def}).
+
+\subsection{Régulation de vitesse}\label{sec:pilot_long}
+La vitesse de consigne $v_{\text{ref}}$ est la vitesse d'avance $V$ du curseur, modifiée selon la trajectoire (profil urbain, freinage, rampe de vitesse du cercle, vitesse minimale de reprise). L'effort demandé est un correcteur proportionnel avec anticipation :
+\begin{equation}
+ F_d=K_v\,(v_{\text{ref}}-v)+M_{\text{tot}}\,a_{\text{ref}}+F_{rr},\qquad K_v=\SI{5000}{N/(m/s)},
+\end{equation}
+où $a_{\text{ref}}$ est l'accélération du profil de vitesse (nulle en régime établi) et $F_{rr}$ la résistance au roulement (§\ref{sec:long}). Pour l'essai de l'élan (ISO~3888-2) et le virage libéré (ISO~9816~\cite{ISO9816}), les gaz sont relâchés à l'entrée de la zone : $v_{\text{ref}}$ n'est plus régulée (roue libre), sauf reprise des gaz sous \SI{15}{km/h}.
+
+\subsection{Profil de vitesse du circuit urbain}
+En circuit urbain, la vitesse de consigne dépend de la courbure $\kappa(s)$ de la trajectoire :
+\begin{equation}
+ v_0(s)=\max\!\Big(v_{\min},\;\min\big(V,\sqrt{a_y/\kappa_s(s)}\big)\Big),\quad v_{\min}=\SI{2}{m/s},
+\end{equation}
+avec $a_y$ l'accélération latérale de confort (\SI{1,5}{m/s^2} par défaut) et $\kappa_s$ la courbure moyennée sur une fenêtre glissante de $\pm\SI{2}{m}$. Deux passes imposent les limites de décélération $a_{\text{dec}}=\SI{2,5}{m/s^2}$ (avant les virages, passe arrière) et d'accélération $a_{\text{acc}}=\SI{1,2}{m/s^2}$ (en sortie, passe avant) :
+\begin{equation}
+ v(s_i)\leftarrow\min\big(v_0(s_i),\sqrt{v(s_{i+1})^2+2a_{\text{dec}}\,\Delta s}\big),\qquad
+ v(s_i)\leftarrow\min\big(v(s_i),\sqrt{v(s_{i-1})^2+2a_{\text{acc}}\,\Delta s}\big).
+\end{equation}
+La régulation utilise alors $v_{\text{ref}}=v(s_j)$ et $a_{\text{ref}}=\dfrac{v(s_{j+1})^2-v(s_j)^2}{2\Delta s}$.
+
+\subsection{Freinage en virage et rampe de vitesse}
+\textbf{Freinage en virage.} Le freinage commence à l'abscisse $s_b=s_{\text{arc},0}+f\,(s_{\text{arc},1}-s_{\text{arc},0})$ (fraction $f$ de l'arc, \SI{30}{\%} par défaut) avec la décélération constante $a$ (\SI{3}{m/s^2}) jusqu'à la vitesse finale $V_{\text{end}}$ (\SI{5}{km/h}) : $v_{\text{ref}}=\sqrt{V^2-2a\,(s-s_b)}$ tant que $v_{\text{ref}}>V_{\text{end}}$. Une ligne au sol matérialise le point de début de freinage.\par
+\textbf{Cercle à vitesse croissante.} La vitesse de consigne croît avec la distance parcourue sur le cercle : $v_{\text{ref}}=\min\big(V_1,\sqrt{V^2+2a\,(s-s_0)}\big)$ ; l'accélération de consigne est $a$ tant que $v_{\text{ref}}<V_1$.
+
+\subsection{Événements d'urgence}\label{sec:emerg}
+En circuit urbain, des événements aléatoires peuvent être ajoutés :
+\begin{itemize}
+ \item \textbf{Piéton} : apparaît à $d_{\text{app}}=\SI{25}{m}$ devant le convoi, décalé latéralement de $\pm\SI{0,8}{m}$ par rapport à l'axe ; après un temps de réaction $t_r=\SI{0,6}{s}$ (converti en distance parcourue $v\,t_r$), le pilote freine avec la décélération d'urgence $a_E=\SI{7}{m/s^2}$ : $F_d=-M_{\text{tot}}\,a_E\,\min(1,v/\SI{0,4}{m/s})$, \emph{freinage entièrement mécanique}. Le convoi s'arrête ; après \SI{1,5}{s} d'arrêt, le piéton quitte la voie et le convoi repart. Le contact est détecté lorsque la distance entre l'obstacle (disque de rayon \SI{0,25}{m}) et la polyligne des articulations, diminuée de la demi-largeur de carrosserie \SI{0,75}{m}, devient inférieure à \SI{2}{cm}.
+ \item \textbf{Évitement} : obstacle de \SI{2,4}{m} de long sur l'axe, apparaissant à $d_{\text{ev}}=\SI{40}{m}$ ; après le temps de réaction, la trajectoire de référence est décalée latéralement de $A=\SI{2}{m}$ du côté tiré au sort. Le décalage est établi 4~m avant l'obstacle, maintenu jusqu'à 4~m après, puis ramené à zéro, avec une transition en demi-cosinus sur $L_r=\max\big(14,\,1{,}8\,\max(3,v)\big)$ m :
+ \begin{equation}
+  o(s)=\text{côté}\cdot A\,\Big[h\!\Big(\tfrac{s-(s_E-4-L_r)}{L_r}\Big)-h\!\Big(\tfrac{s-s_E-4}{L_r}\Big)\Big],\quad h(x)=\tfrac12\big(1-\cos\pi\,\mathrm{clip}(x)\big).
+ \end{equation}
+ Les plots de la voie suivent le décalage.
+\end{itemize}
+Le placement des événements est reproductible (graine) : de préférence en ligne droite (courbure moyenne sur $\pm\SI{30}{m}$ inférieure à $1/60$), espacés d'au moins \SI{90}{m}, à plus de \SI{70}{m} du départ.
+
+% =====================================================================
+\section{Génération des trajectoires}
+Toutes les trajectoires sont des polylignes $\{(x_i,y_i)\}$ échantillonnées à $\Delta s=\SI{5}{cm}$, dont on déduit l'abscisse curviligne $s_i$ et l'angle de cap $\psi_{\text{ref},i}$ (différences centrées). Les plots (cônes) sont des disques de rayon \SI{0,15}{m}.
+
+\subsection{Ligne droite et essais de volant}
+Ligne droite de longueur choisie, avec éventuellement un écart latéral et un écart de cap initiaux. Pour l'étude de la stabilité (essais de volant, boucle quasi ouverte~\cite{ISO14791}), le braquage est imposé par un signal $\delta(t)$ : échelon, impulsion, doublet, sinus, balayage de fréquence (chirp) ou sinus avec palier (sine with dwell), d'amplitude $A$ à la roue (\SI{3}{\degree} par défaut), de début $t_0$ (\SI{2}{s}), de durée et de fréquence réglables, saturé à $\pm35^\circ$. L'écart à la ligne droite n'est alors pas considéré comme une divergence.
+
+\subsection{Double changement de voie (test de l'élan)}
+Deux variantes sont implantées.
+
+\paragraph{Version simplifiée} : $y(x)=A\,[\operatorname{ramp}(x;x_1,x_2)-\operatorname{ramp}(x;x_3,x_4)]$ avec la rampe en demi-cosinus.
+
+\paragraph{ISO 3888-2 (réglage par défaut).} La trajectoire suit l'axe des trois couloirs de plots de la norme, pour un véhicule de largeur $b=\SI{1,5}{m}$ :
+\begin{align}
+ W_1&=1{,}1\,b+0{,}25,\qquad W_3=b+1,\qquad W_5=\max(1{,}3\,b+0{,}25;\,3),\\
+ y_3&=\tfrac{W_1}{2}+1+\tfrac{W_3}{2},\qquad y_5=\tfrac{W_5-W_1}{2},
+\end{align}
+et le polynôme de transition de degré 5, $\sigma(u)=10u^3-15u^4+6u^5$ :
+\begin{equation}
+ y(x)=y_3\,\sigma\!\Big(\frac{x-x_a}{x_b-x_a}\Big)+(y_5-y_3)\,\sigma\!\Big(\frac{x-x_c}{x_d-x_c}\Big),
+\end{equation}
+avec $x_a=x_0+12$, $x_b=x_a+13{,}5$, $x_c=x_b+11$, $x_d=x_c+12{,}5$ (longueurs des couloirs et transitions de la norme), $x_0=\SI{25}{m}$ l'entrée du premier couloir. Les 18 plots sont posés au début, au milieu et à la fin de chaque couloir, de part et d'autre. Les gaz sont relâchés à l'entrée du premier couloir : la vitesse $V$ est la vitesse d'approche, pas une consigne.
+
+\begin{figure}[H]\centering
+\begin{tikzpicture}
+\begin{axis}[width=0.98\linewidth,height=4.6cm,xlabel={$x$ (m)},ylabel={$y$ (m)},axis equal image=false,grid=both,legend style={font=\scriptsize,at={(0.02,0.97)},anchor=north west},ymin=-2.5,ymax=6]
+\addplot[blue!60!black,thick] table {data/iso.dat};
+\addplot[only marks,mark=triangle*,mark size=2pt,orange!90!black] table {data/iso_cones.dat};
+\legend{trajectoire de référence,plots}
+\end{axis}
+\end{tikzpicture}
+\caption{Test de l'élan ISO~3888-2 avec $b=\SI{1,5}{m}$ : axe des couloirs et 18 plots.}\label{fig:iso}
+\end{figure}
+
+\subsection{Slalom}
+Les plots sont posés sur l'axe, à l'abscisse de chaque \emph{maximum d'amplitude} de la trajectoire, $x_i=x_{\text{lead}}+(i-\tfrac12)\lambda$ ($i=1,\dots,n_p$), de sorte que le convoi les contourne alternativement par la gauche et par la droite. La trajectoire est
+\begin{equation}
+ y(x)=\sigma\!\Big(\frac{x-x_{\text{lead}}}{\lambda/2}\Big)\,A\,\sin\!\Big(\pi\,\frac{x-x_{\text{lead}}}{\lambda}\Big),\qquad x_{\text{lead}}=\SI{12}{m},
+\end{equation}
+d'amplitude $A$ (\SI{1,5}{m} par défaut), de demi-période $\lambda$ (espacement des plots, \SI{12}{m}) et de $n_p=5$ plots. L'amplitude atteint $A$ dès le premier maximum grâce à l'enveloppe $\sigma$. Une ligne droite finale (\SI{15}{m}) ramène progressivement le cap à l'axe sur \SI{10}{m}. Les plots touchés sont comptés comme pour les autres trajectoires à plots (portions de largeur \SI{1,5}{m}).
+
+\begin{figure}[H]\centering
+\begin{tikzpicture}
+\begin{axis}[width=0.98\linewidth,height=4.3cm,xlabel={$x$ (m)},ylabel={$y$ (m)},grid=both,legend style={font=\scriptsize,at={(0.98,0.97)},anchor=north east},ymin=-2.4,ymax=2.4]
+\addplot[blue!60!black,thick] table {data/slalom.dat};
+\addplot[only marks,mark=triangle*,mark size=2.4pt,orange!90!black] table {data/slalom_cones.dat};
+\legend{trajectoire de référence,plots}
+\end{axis}
+\end{tikzpicture}
+\caption{Slalom : $A=\SI{1,5}{m}$, $\lambda=\SI{12}{m}$, $5$ plots sur l'axe aux maxima d'amplitude.}\label{fig:slalom}
+\end{figure}
+
+\subsection{Virage, freinage en virage et cercle}
+Entrée droite de longueur $d_{\text{lead}}$, arc de rayon $R$ sur l'angle $\alpha$ (gauche ou droite), puis sortie droite :
+\begin{equation}
+ (x,y)=\big(d_{\text{lead}}+R\sin t,\;\pm R(1-\cos t)\big),\quad t\in[0,\alpha],
+\end{equation}
+puis une droite de cap $\pm\alpha$. Des plots peuvent borner la voie de largeur $W$ (de part et d'autre de la trajectoire, tous les \SI{4}{m} à partir de \SI{8}{m} avant l'arc jusqu'à \SI{8}{m} après). Valeurs par défaut : $R=\SI{12}{m}$, $\alpha=\SI{90}{\degree}$, entrée \SI{10}{m}, largeur \SI{2,5}{m}. Les essais dérivés sont :
+\begin{itemize}
+ \item \textbf{freinage en virage} : arc de $R=\SI{20}{m}$, $\alpha=\SI{90}{\degree}$, entrée de \SI{15}{m}, profil de freinage du §précédent ;
+ \item \textbf{cercle} : virage de $360^\circ\times n_{\text{tours}}$ ($n_{\text{tours}}=2$), rayon \SI{15}{m}, avec vitesse croissante jusqu'à $V_1=\SI{30}{km/h}$ (accélération \SI{0,1}{m/s^2}) pour sonder la limite d'adhérence ou de stabilité du convoi ;
+ \item \textbf{ligne droite en dévers} : droite de \SI{100}{m} avec une pente transversale de \SI{8}{\degree} (§\ref{sec:long}).
+\end{itemize}
+
+\subsection{Circuit urbain}
+Le circuit est une suite de segments droits $S(\ell)$ et de virages $T(\alpha,R)$ ($\alpha>0$ à gauche). Le circuit standard (\SI{657}{m}) est
+\begin{multline*}
+ S(80),T(-90,10),S(45),T(90,10),S(30),T(40,15),T(-80,15),T(40,15),S(100),T(-180,13),\\
+ S(60),T(90,9),S(35),T(90,10),S(50),T(-90,9),S(35),T(90,9),S(50)
+\end{multline*}
+(longueurs et rayons en mètres, angles en degrés) : intersections à \SI{90}{\degree}, chicane, demi-tour de rond-point, virages serrés (figure~\ref{fig:urbain}). Un générateur aléatoire à graine produit des circuits sans croisement : il tire $7$ à $10$ éléments parmi intersections à \SI{90}{\degree} (\SI{50}{\%}, rayon $8$--\SI{12}{m}), chicanes (\SI{18}{\%}, trois arcs de $30$--$45^\circ$, rayon $13$--\SI{17}{m}), demi-tours (\SI{12}{\%}, rayon $11$--\SI{14}{m}) et virages de $40$--$70^\circ$ ($12$--\SI{18}{m}), séparés par des droites de $30$ à \SI{90}{m}. Un circuit est retenu si sa longueur est comprise entre \SI{350}{m} et \SI{900}{m} et s'il ne repasse pas à moins de \SI{14}{m} d'un point situé à plus de \SI{40}{m} d'abscisse curviligne. Des plots bordent la voie, à \SI{3}{m} de large par défaut ($\pm W/2$ de l'axe, tous les \SI{4}{m}).
+
+\begin{figure}[H]\centering
+\begin{tikzpicture}
+\begin{axis}[width=0.75\linewidth,height=6.4cm,xlabel={$x$ (m)},ylabel={$y$ (m)},axis equal image,grid=both]
+\addplot[blue!60!black,thick] table {data/urbain.dat};
+\end{axis}
+\end{tikzpicture}
+\caption{Circuit urbain standard (\SI{657}{m}).}\label{fig:urbain}
+\end{figure}
+
+\subsection{Plots touchés}
+Chaque portion est modélisée par un rectangle de largeur $b=\SI{1,5}{m}$ orienté selon $\theta_k$ et s'étendant de l'articulation avant $J_k$ vers l'arrière sur la longueur $L$ ($L/2$ pour la tête et la queue) ; un plot est touché lorsque son disque de rayon \SI{0,15}{m} rencontre l'un des rectangles, ce qui donne, pour un plot en $(u,v)$ dans le repère de la portion, le critère $-l_k-r\le u\le0{,}09+r$ et $|v|\le b/2+r$. L'instant du premier contact est mémorisé pour colorer le plot en rouge sur l'animation.
+
+% =====================================================================
+\section{Paramétrage de l'outil}
+Les tableaux suivants recensent les paramètres accessibles à l'utilisateur, leur plage et leur valeur par défaut. Les paramètres avancés sont repliés dans l'interface.
+
+\subsection{Paramètres généraux}
+\begin{center}\small
+\begin{tabular}{@{}p{6.6cm}lll@{}}\toprule
+Paramètre & Plage & Défaut & Unité\\\midrule
+Nombre de portions $N$ & 2 à 10 & 5 & --\\
+Vitesse d'avance $V$ & 5 à 50 & 15 & km/h\\
+Durée de simulation & 0 à 120 (0 : automatique) & auto & s\\
+Gain du pilote sur la direction $g$ & 0,3 à 3 & 1,0 & --\\
+Récupération au lever de pédale $p$ & 0 à 100 & 20 & \% de la régén. max\\
+Première articulation bloquée & oui / non & oui & --\\
+Coefficient d'adhérence $\mu$ & 0,1 à 1,5 & 0,8 & --\\
+Saturation des pneus (plafond $\mu F_z$) & oui / non & oui & --\\
+Effort latéral max par pneu $F_{y,\max}$ & 0 : $\mu F_z$ & 0 & N\\
+Saturation des couples d'articulation $\pm M_{\max}$ & oui / non, valeur & oui, 2500 & N$\cdot$m\\
+Comparaison avec $c=0$ (sans amortissement) & oui / non & non & --\\\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Paramètres avancés du véhicule}
+\begin{center}\small
+\begin{tabular}{@{}p{8cm}ll@{}}\toprule
+Paramètre & Défaut & Unité\\\midrule
+Masse de la tête $M_1$ / des portions intermédiaires $M_j$ / de la queue $M_n$ & 300 / 500 / 300 & kg\\
+Inertie $I_1$ / $I_j$ / $I_n$ & 170 / 150 / 100 & kg$\cdot$m$^2$\\
+Longueur d'une portion $L$ & 1,8 & m\\
+Distance $J_1$--centre de gravité de la tête $l_1$ & 0,6 & m\\
+Distance articulation--centre de gravité de la queue $l_n$ & 0,3 & m\\
+Rigidité de dérive par pneu $K_t$ & 13\,600 & N/rad\\\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Commande des articulations}
+\begin{center}\small
+\begin{tabular}{@{}p{8cm}ll@{}}\toprule
+Paramètre & Plage / défaut & Unité\\\midrule
+Amortissement moyen $c$ (curseur, échelle quadratique) & 0 à 1000 (curseur) ; $c=10^{5}(s_c/1000)^2$ & N$\cdot$m$\cdot$s/rad\\
+Loi de répartition & uniforme, linéaire, polynomiale, gaussienne & uniforme\\
+Pente $s$ (linéaire) & $-1$ à $1$ & 0\\
+Degré $p$, plancher $\varepsilon$ (polynomiale) & 1 à 8 ; 0 à 1 & 3 ; 0,1\\
+Centre $x_0$, largeur $\sigma$ (gaussienne) & 0 à 1 ; 0,05 à 1 & 0,5 ; 0,2\\
+\emph{Optimisé selon $N$ et la vitesse} & case & selon table\\
+\emph{Adapter $c$ en direct selon la vitesse} & case, filtre \SI{0,5}{s} & --\\
+Vitesse minimale de commande des vérins $v_g$ & 0 : aucune & km/h\\
+Vitesse de tige minimale (en dessous : vanne ouverte) & 3 & mm/s\\\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Table optimisée.} La case « optimisé » règle $c$ et la répartition à partir de la table des gains (§\ref{sec:optim}) calculée pour $N=3,\dots,10$ et $v=10,20,30,40$~km/h, en quatre configurations (amortisseur idéal ou vérins dynamiques, avec ou sans vectoring). Entre deux vitesses de la table, $c$ est interpolé en logarithme et la pente linéairement. Avec « adapter en direct », la vitesse instantanée du convoi, filtrée par un premier ordre de constante \SI{0,5}{s}, est utilisée pour recalculer $c_k$ pendant la simulation (tous les 20 pas de calcul) au lieu de la vitesse d'avance initiale.
+
+\subsection{Dynamique des vérins}\label{sec:param_verin}
+\begin{center}\small
+\begin{tabular}{@{}p{8cm}ll@{}}\toprule
+Paramètre & Défaut & Unité\\\midrule
+Diamètre piston / tige & 32 / 20 & mm\\
+Rayon des bras $R_1$, entraxe des ancrages $L_2$ & 0,15 ; 0,9 & m\\
+Calage angulaire $\varphi$, longueur au repos $\lambda_0$ & 20 ; 0,465 & \si{\degree} ; m\\
+Pression de gonflage $P_c$ (tige sortie), limiteur $P_{\lim}$ & 15 ; 200 & bar\\
+Accumulateur : précharge $P_0$, volume $V_0$ & 10 ; 160 & bar ; mL\\
+Module de compressibilité $B$ & 1,5 & GPa\\
+Vanne : $\omega_n$, $\zeta$, facteur $K_s$ & 20 ; 0,9 ; 1 & rad/s ; -- ; --\\
+Boucle sur l'effort : $K_p$, $K_i$ & 0,5 ; 5 & -- ; s$^{-1}$\\
+Courant min, max & 0,394 ; 1,144 & A\\
+$\alpha$, $I_0$ & ajustés sur la table & SI ; A\\\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Vectoring de couple}
+\begin{center}\small
+\begin{tabular}{@{}p{8cm}ll@{}}\toprule
+Paramètre & Défaut & Unité\\\midrule
+Activation & non & --\\
+Gains $k_\omega$, $k_d$ & 10 ; 10 & s$^{-1}$\\
+Couple moteur & mesures, régén. 100~A (ou 50~A, ou constant \SI{250}{N.m}) & --\\
+Demi-voie des roues motrices $e$ (portions intermédiaires / arrière) & 0,46 / 0,46 & m\\
+Rayon de roue $r_{\text{eff}}$ & 0,23 & m\\
+Vitesse minimale d'activation & 10 & km/h\\\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Paramètres des trajectoires}
+\begin{center}\small
+\begin{tabular}{@{}p{5.2cm}p{7.3cm}@{}}\toprule
+Trajectoire & Paramètres (plage ; défaut)\\\midrule
+Test de l'élan ISO 3888-2 & largeur du véhicule $b=\SI{1,5}{m}$, entrée $x_0=\SI{25}{m}$, sortie \SI{25}{m}\\
+Slalom & amplitude \numrange{0,5}{3} ; \num{1,5}\,m ; espacement \numrange{6}{25} ; \num{12}\,m ; nombre de plots \numrange{3}{10} ; \num{5} ; droite finale \numrange{0}{40} ; \num{15}\,m\\
+Virage & rayon \numrange{4}{40} ; \num{12}\,m ; angle \numrange{30}{180} ; \SI{90}{\degree} ; entrée \numrange{5}{30} ; \num{10}\,m ; largeur du couloir \numrange{1,8}{5} ; \num{2,5}\,m\\
+Freinage en virage & rayon \numrange{4}{40} ; \num{20}\,m ; angle $90^\circ$ ; entrée \num{15}\,m ; décélération \numrange{0,5}{6} ; \num{3}\,m/s$^2$ ; début à \numrange{0}{100} ; \num{30}\,\% de l'arc ; vitesse finale \numrange{0}{40} ; \num{5}\,km/h ; couloir \num{2,5}\,m\\
+Cercle & rayon \numrange{5}{40} ; \num{15}\,m ; tours \numrange{1}{4} ; \num{2} ; vitesse finale \numrange{5}{60} ; \num{30}\,km/h ; accélération \numrange{0,02}{0,5} ; \num{0,1}\,m/s$^2$\\
+Dévers & longueur \numrange{20}{300} ; \num{100}\,m ; pente \numrange{0}{20} ; \SI{8}{\degree}\\
+Circuit urbain & mode standard ou aléatoire (graine) ; largeur de voie \numrange{2,4}{5} ; \num{3}\,m ; $a_y$ \numrange{0,5}{3} ; \num{1,5}\,m/s$^2$ ; décélération \numrange{0,8}{4} ; \num{2,5} ; accélération en sortie \numrange{0,3}{2} ; \num{1,2}\,m/s$^2$\\
+Événements d'urgence (urbain) & piéton : apparition \numrange{10}{50} ; \num{25}\,m, réaction \numrange{0,2}{1,5} ; \num{0,6}\,s ; évitement : apparition \numrange{20}{70} ; \num{40}\,m, décalage \numrange{1}{4} ; \num{2}\,m ; décélération d'urgence \numrange{3}{9} ; \num{7}\,m/s$^2$\\
+Essais de volant & type (échelon, impulsion, doublet, sinus, chirp, sinus avec palier) ; amplitude \numrange{0,5}{15}\,$^\circ$ (\num{3}) ; début \numrange{0}{10}\,s (\num{2}) ; durée ; fréquence \numrange{0,1}{3}\,Hz (\num{0,5}) ; durée de l'essai \numrange{10}{60}\,s (\num{15})\\\bottomrule
+\end{tabular}
+\end{center}
+
+% =====================================================================
+\section{Indicateurs d'évaluation}\label{sec:indic}
+\begin{itemize}
+ \item \textbf{Erreur de la tête} $e_1=\max_t|e(t)|$ : écart latéral maximal de $J_1$ par rapport à la trajectoire de référence.
+ \item \textbf{Erreur de la queue} $e_N=\max_t\big|\text{écart signé de }A_N\text{ à la trajectoire}\big|$, calculée sur la polyligne de référence (recherche locale du point le plus proche, en tenant compte du décalage d'évitement).
+ \item \textbf{Déport} (\emph{offtracking}) : écart latéral signé entre le centre d'essieu $A_N$ de la queue et la trajectoire réellement suivie par la tête (prolongée en ligne droite avant $t=0$), pour distinguer l'effet géométrique du suivi de trajectoire.
+ \item \textbf{Amplification arrière} (RWA, \emph{rearward amplification}, ISO~14791) : $\mathrm{RWA}=\max|a_y^{(N)}|/\max|a_y^{(1)}|$, avec $a_y^{(k)}$ l'accélération latérale du centre de gravité de la portion $k$, obtenue par différences finies du centre de gravité simulé et projetée sur la normale à la portion ; on affiche aussi le maximum le long du convoi et le rapport des vitesses de lacet.
+ \item \textbf{Plots touchés} : $n_{\text{touchés}}/n_{\text{plots}}$ (§précédent).
+ \item \textbf{Angles et couples d'articulation} : amplitude maximale du braquage $\delta_0$, angle relatif maximal $\max_k|\theta_k-\theta_1|$, couples $M_{a,k}(t)$ et leur saturation.
+ \item \textbf{Efforts} : forces latérales par essieu, efforts de vectoring ($M_{z,k}$, forces de roue gauche et droite), courants et pressions des vérins (fond, nœud), effort et couple fournis.
+ \item \textbf{Urgences} : pour chaque événement, contact (oui/non), instant, vitesse d'impact, distance minimale carrosserie--obstacle, début et fin de freinage, distance d'arrêt.
+ \item \textbf{Statut} : \code{fin}, \code{diverge} ou \code{nan} (§\ref{sec:integ}).
+\end{itemize}
+
+% =====================================================================
+\section{Modes dégradés}\label{sec:def}
+La page « modes dégradés » injecte des défauts dans la simulation, à un instant $t_0$ choisi, et compare le résultat à la simulation nominale.
+
+\subsection{Catalogue de défauts}
+Chaque défaut est décrit par un type, une articulation ou une portion, éventuellement un côté (vérin ou roue gauche/droite), une valeur et un instant $t_0$. Les 25 types sont regroupés en six familles :
+\begin{center}\small
+\begin{tabularx}{\linewidth}{@{}p{3.1cm}X@{}}\toprule
+Famille & Défauts (effet modélisé)\\\midrule
+Capteur d'angle d'articulation & perte du signal (vitesse relative mesurée nulle), signal figé, biais (rad/s), erreur de gain, retard de mesure : agissent sur la vitesse relative qui alimente la loi de commande $c_k\,\dt\psi$.\\
+Vérins d'articulation & un vérin sur deux hors service (vanne ouverte, $I_{\max}$), un vérin bloqué vanne fermée (sur-amortissement, $I_{\min}$), les deux vérins hors service (articulation libre), articulation grippée (blocage par réduction du système), perte de pression d'un vérin (fraction d'effort restante).\\
+Capteur de pression & perte du capteur de pression ($P_1$ lue nulle) : perturbe la boucle d'effort.\\
+Moteurs-roues & perte d'un ou des deux moteurs d'une portion, couple bloqué (N$\cdot$m), frein traînant (N), régénération indisponible (batterie pleine, par portion ou sur toutes), batterie vide (pas de traction), couple moteur limité par un facteur.\\
+Capteurs du vectoring & perte ou biais du gyroscope, perte de la mesure de vitesse (codeurs).\\
+Pneus et environnement & crevaison d'un pneu, perte d'adhérence totale, perte d'adhérence d'un seul côté du convoi, flaque localisée.\\\bottomrule
+\end{tabularx}
+\end{center}
+Pour la batterie pleine et la batterie vide, chaque portion a sa propre batterie : l'utilisateur choisit la ou les portions concernées.
+
+\subsection{Scénarios aléatoires et campagnes}
+Un scénario aléatoire tire des défauts selon un niveau de criticité. Le niveau « peu critique » tire 1 défaut, « moyennement critique » 1 à 2 défauts et « très critique » 2 à 4 défauts ; le tirage (type, articulation ou portion, côté, valeur, instant $t_0\in[2;7]$~s) est retenu si la \emph{sévérité totale} $\sum_i s_i$, somme des sévérités du catalogue ($s_i=1$ à $4$, pondérée de $1+\tfrac12(m-1)$ lorsqu'un défaut de capteur touche $m$ articulations à la fois), est comprise entre 1 et 2, entre 3 et 5, ou au moins égale à 6 respectivement. La graine rend le tirage reproductible. Les types liés aux vérins ou au vectoring ne sont proposés que si ces options sont actives. Une campagne répète un nombre donné de tirages et agrège les notes.
+
+\subsection{Évaluation}
+Chaque simulation avec défauts est comparée à la simulation nominale (même trajectoire, mêmes réglages) et reçoit une note :
+\begin{center}\small
+\begin{tabular}{@{}cl@{}}\toprule
+Note & Critère\\\midrule
+A & sans conséquence : $e_N\le\SI{0,5}{m}$ et dégradation $e_N-e_{N,\text{nom}}\le\SI{0,25}{m}$\\
+B & dégradation : $e_N>\SI{0,5}{m}$ ou $e_N-e_{N,\text{nom}}>\SI{0,25}{m}$\\
+C & sortie de trajectoire : $e_N>\SI{1}{m}$ ou plus de plots touchés qu'en nominal\\
+D & perte de contrôle : divergence, ou $e_N>\SI{2}{m}$\\\bottomrule
+\end{tabular}
+\end{center}
+
+% =====================================================================
+\section{Optimisation de la loi de commande des articulations}\label{sec:optim}
+Les gains d'amortissement présentés dans l'outil sont le résultat d'une optimisation hors ligne, décrite en détail dans \fichier{doc/optimisation/optimisation.tex} et résumée ici.
+
+\paragraph{Variables.} Le coefficient moyen $c$ et la pente $s\in[-0{,}9;0{,}9]$ de la répartition linéaire (§\ref{sec:repart}), pour chaque couple $(N,v)$ avec $N=3,\dots,10$ et $v\in\{10,20,30,40\}$~km/h.
+
+\paragraph{Manœuvres de test.} (i) test de l'élan ISO~3888-2, (ii) slalom, (iii) virage de $90^\circ$ (rayon \SI{12}{m}), (iv) freinage en virage. Chacune est simulée avec les réglages par défaut du moteur.
+
+\paragraph{Critère.} Pour une manœuvre $m$, avec $e_m$ l'erreur de la queue, $d_m$ le déport, $p_m$ le nombre de plots touchés et $\mathrm{RWA}_m$ borné à 5 :
+\begin{equation}
+ J_m=\begin{cases}e_m+0{,}5\,d_m+0{,}15\,\mathrm{RWA}_m+0{,}1\,p_m&\text{si le convoi suit la trajectoire,}\\10&\text{s'il diverge,}\end{cases}\qquad
+ J(c,s)=\tfrac12\max_mJ_m+\tfrac12\overline{J_m}+0{,}01\ln c.
+\end{equation}
+
+\paragraph{Algorithme.} Grille grossière de $25$ configurations ($c\in\{1000;2500;6000;15000;40000\}$, $s\in\{-0{,}6;-0{,}3;0;0{,}3;0{,}6\}$) puis deux raffinements locaux autour du meilleur point ($c\times\{1/f,1,f\}$, $s+\{-\delta,0,\delta\}$ avec $f=1{,}6$ puis $\sqrt{1{,}6}$ et $\delta=0{,}15$ puis $0{,}075$), soit environ $35$ configurations $\times$ $4$ manœuvres par couple $(N,v)$. C'est une recherche locale : l'optimum n'est pas garanti global.
+
+\paragraph{Extensions.} La même démarche a été relancée (i) avec la dynamique des vérins (modèle hydraulique du §\ref{sec:verins}), (ii) avec et sans vectoring de couple, (iii) avec un critère d'amplification arrière. Les tables complètes figurent dans \fichier{doc/optimisation/table_gains.md}, indexées par vitesse, nombre de portions et configuration, et sont intégrées à la page par \fichier{gains_page.json}. À titre d'exemple, pour l'amortisseur idéal sans vectoring : $N=5$, \SI{10}{km/h} : $c=\SI{4743}{N.m.s/rad}$, $s=+0{,}37$, $J=0{,}38$ ; $N=5$, \SI{20}{km/h} : $c=\SI{1976}{N.m.s/rad}$, $s=+0{,}75$, $J=0{,}47$.
+
+\paragraph{Lecture.} À faible vitesse le minimum est plat ; au-delà de \SI{30}{km/h} aucun réglage testé ne stabilise les convois longs dans ces manœuvres. Le test de l'élan est le plus discriminant : à \SI{20}{km/h} le réglage optimal touche de 0 à 2 plots selon $N$.
+
+% =====================================================================
+\section{Vérification, limites et perspectives}\label{sec:verif}
+\subsection{Vérification réalisée}
+\begin{itemize}
+ \item \textbf{Modèle des vérins} (\fichier{doc/animation/verification/}) : le code MATLAB \fichier{modeleVerinArt.m} et la comparaison aux mesures ont été transcrits en Python (scipy, Radau) ; les efforts calculés reproduisent les résultats MATLAB (RMS de force \SIlist{29;93;365}{N} côté MATLAB contre \SIlist{31;92;367}{N} côté transcription sur trois essais ; pic de $\Delta P$ identique à \SI{0,1}{bar} près). L'écart entre le module JavaScript et cette transcription, à entrées identiques, est inférieur à \SI{0,02}{bar} sur $P_1$ et \SI{1,5}{N} sur la force.
+ \item \textbf{Table constructeur} : un ajustement sur les essais montre que la table sous-estime le débit réel de la vanne d'un facteur 2 à 3 (réglage correspondant : facteur $K_s$). La structure du modèle est cependant jugée correcte.
+ \item \textbf{Optimisation} : les tableaux sont produits par le même moteur que la page.
+\end{itemize}
+
+\subsection{Limites du modèle}
+\begin{itemize}
+ \item Pneu : loi de $\tanh$ sans adhérence combinée (sauf cercle de frottement dans l'allocation du vectoring), sans relaxation transitoire, sans transfert de charge ni débattement de suspension ; la charge verticale est $m_kg/n_P$.
+ \item Dynamique plane à vitesse proche de la consigne ; régulation de vitesse proportionnelle idéale (pas de modèle de batterie ni de moteur autre que les courbes de couple maximal).
+ \item Dynamique des vérins : modèle simplifié à deux pressions par vérin, sans fuites internes ; la vanne suit la table constructeur multipliée par un facteur ; le jeu mécanique et le frottement sec des articulations ne sont pas modélisés.
+ \item Le pilote est une loi de Stanley sans modèle de retard de conducteur ni anticipation de la trajectoire, hormis le profil de vitesse en urbain.
+ \item Les défauts sont des modèles de type « avarie » simples (valeur imposée, gain, biais) et non issus d'une analyse de modes de défaillance (AMDEC) ; la notation A à D est un critère interne à l'outil.
+ \item La comparaison numérique directe du moteur de convoi avec le code MATLAB de référence n'est pas documentée dans ce rapport (seule la partie vérins l'est).
+\end{itemize}
+
+\subsection{Perspectives}
+Comparer le moteur au code MATLAB et à un essai réel ; ajouter le transfert de charge et la dérive transitoire ; intégrer les fuites internes et la température du fluide au modèle des vérins (voir l'animation de l'articulation) ; remplacer les défauts par un catalogue issu de l'analyse de sûreté ; étendre l'optimisation à des lois de commande à plus de deux paramètres (loi IDA-PBC~\cite{Ortega2002}, voir \fichier{convoi_porthamiltonien.tex}).
+
+% =====================================================================
+\appendix
+\section{Correspondance avec le code source}\label{app:code}
+\begin{center}\small
+\begin{tabular}{@{}p{4.3cm}p{9.2cm}@{}}\toprule
+Sujet & Fonction ou fichier\\\midrule
+Construction du modèle & \code{buildModel} (\fichier{moteur.js})\\
+Équations du mouvement, pneus, vectoring & \code{dynamics}\\
+Géométrie des points $J_k,G_k,A_k$ & \code{geomPoints}\\
+Trajectoires & \code{makePath}, \code{urbanPoints}, \code{urbanRandom}\\
+Pilote latéral et longitudinal & \code{makePilot}\\
+Événements d'urgence & \code{emergPlace}, \code{evOff}\\
+Boucle fermée & \code{simulateClosed}\\
+Essais de volant & \code{steerSignal}\\
+Plots touchés & \code{coneHits}\\
+RWA, déport & \code{rwaCompute}, \code{deportCompute} (\fichier{rwa.js})\\
+Vérins & \code{verinParams}, \code{verinInit}, \code{verinCommand}, \code{verinAdvance}, \code{vGeo}, \code{vDebit}, \code{vRhs} (\fichier{verin.js})\\
+Couples moteurs & \code{Tmot} (\fichier{couple.js})\\
+Défauts & \code{FCAT}, \code{faultRuntime}, \code{randomScenario}, \code{gradeResult} (\fichier{faults.js})\\
+Optimisation & \fichier{doc/optimisation/}, \fichier{tables_gains.py}\\
+Animation de l'articulation & \fichier{doc/presentation_commande/animation_articulation.html} (V1), \fichier{animation_articulation_v2.html} (V2)\\\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Utilisation et reconstruction}
+\begin{itemize}
+ \item Régénérer les pages : \code{cd doc/animation \&\& python3 construire.py}. Les fichiers produits sont \fichier{simulation_convoi.html} et \fichier{simulation_degrade.html}, copiés dans le dossier \fichier{Simulation_Convoi/} pour diffusion.
+ \item Les courbes de couple moteur sont générées par \fichier{doc/moteurs/extraire_couple.py} à partir des essais du 29/01/2026.
+ \item La table des gains est produite par \fichier{tables_gains.py} à partir des résultats d'optimisation.
+\end{itemize}
+
+\begin{thebibliography}{99}
+\bibitem{Li2024} X. Li \emph{et al.}, « A Modelling Method for All-axle Steered Multi-articulated Vehicles », UKACC Control, 2024.
+\bibitem{Jujnovich2013} B. R. Jujnovich, D. Cebon, « Path-following steering control for articulated vehicles », \emph{ASME Journal of Dynamic Systems, Measurement, and Control}, 135(3), 2013.
+\bibitem{Gillespie1992} T. D. Gillespie, \emph{Fundamentals of Vehicle Dynamics}, SAE International, 1992.
+\bibitem{Rajamani2012} R. Rajamani, \emph{Vehicle Dynamics and Control}, 2\textsuperscript{e} éd., Springer, 2012.
+\bibitem{Pacejka2012} H. B. Pacejka, \emph{Tire and Vehicle Dynamics}, 3\textsuperscript{e} éd., Butterworth-Heinemann, 2012.
+\bibitem{Kiencke2005} U. Kiencke, L. Nielsen, \emph{Automotive Control Systems}, 2\textsuperscript{e} éd., Springer, 2005.
+\bibitem{Spong2006} M. W. Spong, S. Hutchinson, M. Vidyasagar, \emph{Robot Modeling and Control}, Wiley, 2006.
+\bibitem{Thrun2006} S. Thrun \emph{et al.}, « Stanley: The robot that won the DARPA Grand Challenge », \emph{Journal of Field Robotics}, 23(9), 2006.
+\bibitem{Hoffmann2007} G. M. Hoffmann, C. J. Tomlin, M. Montemerlo, S. Thrun, « Autonomous Automobile Trajectory Tracking for Off-Road Driving: Controller Design, Experimental Validation and Racing », \emph{American Control Conference}, 2007.
+\bibitem{Shibahata1993} Y. Shibahata, K. Shimada, T. Tomari, « Improvement of vehicle maneuverability by direct yaw moment control », \emph{Vehicle System Dynamics}, 22(5--6), 1993.
+\bibitem{Hori2004} Y. Hori, « Future vehicle driven by electricity and control -- research on four-wheel-motored “UOT Electric March II” », \emph{IEEE Transactions on Industrial Electronics}, 51(5), 2004.
+\bibitem{DeNovellis2014} L. De Novellis, A. Sorniotti, P. Gruber, « Wheel torque distribution criteria for electric vehicles with torque-vectoring differentials », \emph{IEEE Transactions on Vehicular Technology}, 63(4), 2014.
+\bibitem{Merritt1967} H. E. Merritt, \emph{Hydraulic Control Systems}, Wiley, 1967.
+\bibitem{Watton2009} J. Watton, \emph{Fundamentals of Fluid Power Control}, Cambridge University Press, 2009.
+\bibitem{Manring2005} N. D. Manring, \emph{Hydraulic Control Systems}, Wiley, 2005.
+\bibitem{Pourmovahed1990} A. Pourmovahed, D. R. Otis, « An experimental thermal time-constant correlation for hydraulic accumulators », \emph{ASME Journal of Dynamic Systems, Measurement, and Control}, 112(1), 1990.
+\bibitem{Hairer1996} E. Hairer, G. Wanner, \emph{Solving Ordinary Differential Equations II: Stiff and Differential-Algebraic Problems}, 2\textsuperscript{e} éd., Springer, 1996.
+\bibitem{Ortega2002} R. Ortega, A. van der Schaft, B. Maschke, G. Escobar, « Interconnection and damping assignment passivity-based control of port-controlled Hamiltonian systems », \emph{Automatica}, 38(4), 2002.
+\bibitem{ISO3888} ISO~3888-2, \emph{Véhicules routiers -- Procédure d'essai de changement de voie double}, partie~2 : évitement d'obstacle.
+\bibitem{ISO14791} ISO~14791, \emph{Véhicules routiers lourds et autobus -- Méthodes d'essai en boucle ouverte pour la détermination de la stabilité latérale des véhicules combinés}.
+\bibitem{ISO9816} ISO~9816, \emph{Voitures particulières -- Réactions du véhicule dans un virage lors du relâchement de l'accélérateur -- Méthode d'essai en boucle ouverte}.
+\end{thebibliography}
+\end{document}

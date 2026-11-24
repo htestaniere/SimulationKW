@@ -1,0 +1,123 @@
+\documentclass[a4paper,11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[french]{babel}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs,array}
+\usepackage{siunitx}
+\sisetup{locale=FR}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+
+\title{\textbf{Optimisation de l'amortissement des articulations}\\[2mm]
+\large Démarche, critère et résultats}
+\author{Hugo TESTANIERE}
+\date{}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+\section{Objectif}
+Les articulations du convoi reçoivent un couple amortisseur $M_k=c_k\,(\dot\theta_{k+1}-\dot\theta_k)$ (partie commande du rapport). Sans amortissement, le convoi présente une divergence de la tête et un serpentement instables dès quelques km/h. Avec un amortissement trop faible il reste instable ; trop fort, il devient inefficace (couples saturés) et réduit la manœuvrabilité.
+
+L'optimisation cherche, pour chaque nombre de portions $N=3,\dots,10$ et chaque vitesse $v\in\{10,20,30,40\}$\,km/h, le \emph{coefficient d'amortissement moyen} $c$ et la \emph{répartition} de cet amortissement le long du convoi qui donnent le meilleur suivi de trajectoire. Les résultats alimentent la page de simulation : changer $N$ ou la vitesse règle automatiquement $c$ et la répartition.
+
+\section{Variables optimisées}
+\begin{itemize}
+  \item $c$ : amortissement \emph{moyen} des $n=N-1$ articulations (\si{N.m.s/rad}).
+  \item $s\in[-0{,}9;\,0{,}9]$ : \emph{pente} de la répartition linéaire. Pour l'articulation $k$ ($k=0,\dots,n-1$ de l'avant vers l'arrière), avec $x_k=k/(n-1)$,
+  \begin{equation}
+    g_k=\max\big(0,\;1+s\,(1-2x_k)\big),\qquad
+    c_k=c\;\frac{g_k}{\frac1n\sum_j g_j}.
+  \end{equation}
+  La moyenne des $c_k$ vaut toujours $c$ : on compare des répartitions à amortissement total constant. $s>0$ concentre l'amortissement vers l'avant, $s<0$ vers l'arrière, $s=0$ est la répartition uniforme.
+\end{itemize}
+
+\section{Ce qui est fixé}
+\begin{center}\small
+\begin{tabular}{@{}ll@{}}\toprule
+Paramètre & Valeur\\\midrule
+Modèle & Lagrange non linéaire, intégration Runge--Kutta d'ordre 4\\
+Pneus & rigidité $K_t=\SI{13600}{N/rad}$, saturation en $\tanh$, $\mu=0{,}8$\\
+Articulation 1 & bloquée (réglage par défaut de la page)\\
+Couples & amortisseur idéal, saturés à $\pm\SI{2500}{N.m}$ (sans dynamique des vérins)\\
+Pilote & loi de Stanley sur l'essieu de tête, gain $1$, braquage limité à $\pm35^\circ$\\
+Masses, longueurs & valeurs par défaut (voir page de simulation)\\\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Manœuvres de test}
+Quatre manœuvres, chacune simulée à la vitesse étudiée :
+\begin{enumerate}
+  \item \textbf{Test de l'élan} : couloirs de plots de l'ISO 3888-2 pour un véhicule de largeur $b=\SI{1,5}{m}$ (entrée \SI{12}{m} de large $1{,}1\,b+0{,}25$, transition \SI{13,5}{m}, évitement \SI{11}{m} de large $b+1$ décalé de \SI{1}{m} par rapport au bord du premier couloir, retour \SI{12,5}{m}, sortie \SI{12}{m}), 18 plots, trajectoire de référence suivant l'axe des couloirs (polynôme de degré 5 dans les transitions).
+  \item \textbf{Slalom} : amplitude \SI{1,5}{m}, plots espacés de \SI{12}{m}, $5$ plots.
+  \item \textbf{Virage} de $90^\circ$ à gauche, rayon \SI{12}{m}.
+  \item \textbf{Freinage en virage} : virage de $90^\circ$, rayon \SI{20}{m}, décélération \SI{3}{m/s^2} à partir de $30\,\%$ de l'arc, jusqu'à \SI{5}{km/h}.
+\end{enumerate}
+
+\section{Critère}
+Pour une manœuvre $m$ on mesure sur la simulation :
+\begin{itemize}
+  \item $e_m$ : erreur maximale du centre d'essieu de la dernière portion par rapport à la trajectoire (m) ;
+  \item $d_m$ : \emph{déport} maximal, écart latéral entre la queue et la trajectoire réellement suivie par la tête (m) ;
+  \item $p_m$ : nombre de plots touchés (test de l'élan seulement) ;
+  \item $\mathrm{RWA}_m$ : \emph{rearward amplification}, rapport de l'accélération latérale maximale de la dernière portion à celle de la première (accélérations au centre de gravité, norme ISO~14791), borné à $5$.
+\end{itemize}
+Le coût d'une manœuvre est
+\begin{equation}
+  J_m=\begin{cases}
+    e_m+0{,}5\,d_m+0{,}15\,\mathrm{RWA}_m+0{,}1\,p_m & \text{si le convoi suit la trajectoire,}\\
+    10 & \text{si le convoi diverge (perte de contrôle).}
+  \end{cases}
+\end{equation}
+Le coût d'une configuration $(c,s)$ combine le pire cas et la moyenne des manœuvres, avec une très légère pénalité sur $c$ pour départager les cas équivalents :
+\begin{equation}
+  J(c,s)=\tfrac12\max_m J_m+\tfrac12\,\overline{J_m}+0{,}01\,\ln c .
+\end{equation}
+Les poids ($0{,}5$ pour le déport, $0{,}15$ pour le RWA) sont des choix de l'auteur : un point de RWA en plus vaut environ \SI{15}{cm} d'erreur de suivi.
+
+\section{Algorithme}
+Pour chaque couple $(N,v)$ :
+\begin{enumerate}
+  \item \textbf{Grille grossière} : $c\in\{1000;\,2500;\,6000;\,15000;\,40000\}$ et $s\in\{-0{,}6;\,-0{,}3;\,0;\,0{,}3;\,0{,}6\}$, soit $25$ configurations, chacune simulée sur les $4$ manœuvres.
+  \item \textbf{Raffinement local} (deux itérations) autour du meilleur point : on teste $c\times\{1/f,1,f\}$ et $s+\{-\delta,0,\delta\}$ avec $f=1{,}6$ puis $\sqrt{1{,}6}$, et $\delta=0{,}15$ puis $0{,}075$.
+\end{enumerate}
+C'est une recherche locale, pas un optimiseur global : l'optimum trouvé n'est pas garanti global. Environ $35$ configurations $\times\,4$ manœuvres sont simulées par couple $(N,v)$.
+
+\section{Résultats}
+Les tableaux donnent le réglage retenu, le coût $J$, le RWA moyen sur les manœuvres qui ne divergent pas, et les manœuvres où le convoi diverge malgré le meilleur réglage trouvé.
+\input{tableaux}
+
+\paragraph{Lecture.}
+\begin{itemize}
+  \item À faible vitesse le minimum est plat : plusieurs couples $(c,s)$ donnent des résultats voisins, le réglage retenu est peu discriminant.
+  \item À mesure que la vitesse et le nombre de portions augmentent, le coût croît et des divergences apparaissent : au-delà de \SI{30}{km/h}, aucun réglage testé ne stabilise les convois longs dans ces manœuvres.
+  \item Test de l'élan (couloirs ISO~3888-2, $18$ plots) avec le réglage optimal : aucun plot touché à \SI{10}{km/h}, de $0$ à $2$ plots à \SI{20}{km/h}, de $1$ à $10$ à \SI{30}{km/h} et de $2$ à $7$ à \SI{40}{km/h} selon $N$ : le convoi suit la trajectoire mais ne tient pas dans les couloirs aux vitesses élevées.
+  \item Lorsque des manœuvres divergent, les valeurs affichées sont le « moins mauvais » réglage testé : elles ne stabilisent pas le convoi.
+\end{itemize}
+
+\section{Utilisation dans la page de simulation}
+La table est intégrée à la page (\texttt{doc/animation/simulation\_convoi.html}). La case « c et répartition optimisés selon N et la vitesse » règle $c$ et la pente quand on modifie $N$ ou la vitesse. Entre deux vitesses de la table, $c$ est interpolé en logarithme et la pente linéairement. Un avertissement s'affiche lorsque le réglage correspond à une configuration qui diverge. Modifier $c$ ou la répartition à la main désactive la case.
+
+\section{Limites}
+\begin{itemize}
+  \item Résultats valables pour les conditions et manœuvres du tableau ci-dessus ; non garantis avec une autre adhérence, d'autres masses, d'autres amplitudes de manœuvre, sans saturation de pneus ou avec la dynamique des vérins.
+  \item Famille de répartitions restreinte à la loi linéaire ; le gain du pilote, les gains du vérin et la saturation des couples ne sont pas optimisés.
+  \item Le modèle de pneu ne prend pas en compte l'adhérence combinée ni le transfert de charge.
+  \item Le modèle du convoi n'a pas été comparé numériquement au code MATLAB d'origine.
+\end{itemize}
+
+\section{Relancer le calcul}
+Les fichiers sont dans \texttt{doc/optimisation/} :
+\begin{itemize}
+  \item \texttt{opt\_rwa.html} : programme d'optimisation (à ouvrir dans Chrome avec \texttt{\#V=20\&N=3-10}) ; la progression sort dans la console du navigateur ;
+  \item \texttt{logs/} : journaux de calcul ;
+  \item \texttt{generer.py} : fusionne les journaux, écrit \texttt{resultats.json} (lu par la page) et \texttt{tableaux.tex} (ce document) ;
+  \item \texttt{v1\_sans\_RWA/} : première version de l'optimisation, sans le terme de RWA dans le critère.
+\end{itemize}
+Après un nouveau calcul : \texttt{python3 generer.py}, puis \texttt{python3 construire.py} dans \texttt{doc/animation/}.
+
+\end{document}

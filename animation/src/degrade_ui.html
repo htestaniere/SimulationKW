@@ -1,0 +1,23 @@
+<div id="degBlock">
+<div class="sect">Défauts et modes dégradés</div>
+<div class="tabs" style="margin:4px 0 8px"><button id="dmMan" class="on">Scénario manuel</button><button id="dmRnd">Scénario aléatoire</button><button id="dmCmp">Campagne aléatoire</button></div>
+<div id="dpMan" class="grid" style="align-items:end">
+ <label><span>Défaut</span><select id="dfType"></select></label>
+ <label id="dfArtL"><span>Articulation</span><select id="dfArt"></select></label>
+ <label id="dfSideL"><span>Vérin</span><select id="dfSide"><option value="0">gauche</option><option value="1">droit</option></select></label>
+ <label id="dfValL"><span id="dfValN">Valeur</span><input type="number" id="dfVal" step="any"></label>
+ <label><span>Instant d'apparition (s)</span><input type="number" id="dfT0" value="3" min="0" step="0.5"></label>
+ <div><button id="dfAdd" class="on">Ajouter le défaut</button> <button id="dfClear">Tout effacer</button></div>
+</div>
+<div id="dpRnd" class="grid hid" style="align-items:end">
+ <label><span>Criticité du scénario tiré</span><select id="rdLevel"><option value="peu">peu critique</option><option value="moyen">moyennement critique</option><option value="tres">très critique</option><option value="alea">niveau aléatoire</option></select></label>
+ <label><span>Graine aléatoire</span><input type="number" id="rdSeed" value="1" min="1" step="1"></label>
+ <div><button id="rdDraw" class="on">Tirer un scénario (graine ci-contre)</button> <button id="rdRand">Tirage 100 % aléatoire</button></div>
+</div>
+<div id="dpCmp" class="grid hid" style="align-items:end">
+ <label><span>Scénarios par niveau de criticité</span><input type="number" id="cpNum" value="15" min="3" max="60" step="1"></label>
+ <label><span>Graine de départ</span><input type="number" id="cpSeed" value="1" min="1" step="1"></label>
+ <div><button id="cpRun" class="on">Lancer la campagne (graine ci-contre)</button> <button id="cpRunRand">Campagne 100 % aléatoire</button> <span id="cpProg" style="color:var(--mut)"></span></div>
+</div>
+<div id="dfList" style="margin:8px 0 2px;font-size:14px"></div>
+</div>

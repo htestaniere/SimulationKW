@@ -1,0 +1,2100 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Simulation du convoi articulé</title>
+<style>
+@media print{body *{visibility:hidden}#repCard,#repCard *{visibility:visible}#repCard{position:absolute;left:0;top:0;width:100%}.noprint{display:none!important}}
+.hideUser{display:none!important}
+details input[type=number]{width:100%;font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)}
+summary:hover{color:var(--acc)}
+:root{--bg:#f6f7f9;--card:#fff;--ink:#222;--mut:#667;--line:#d5d9e0;--road:#c8ccd4;--acc:#3b8043;--head:#d4a800;--tail:#3b8043;--ghost:#d0342c;--ok:#2e9e5b}
+@media (prefers-color-scheme:dark){:root{--bg:#15171b;--card:#1e2126;--ink:#e6e8ec;--mut:#9aa2af;--line:#363b44;--road:#4a505b;--head:#f2d54f;--tail:#7cc48c;--ghost:#ff6b6b;--ok:#4cc77f}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,'Segoe UI',sans-serif}
+main{max-width:1280px;margin:0 auto;padding:16px}
+h1{font-size:22px;margin:4px 0 2px}p.sub{margin:6px 0 12px;color:var(--mut)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:12px}
+canvas{width:100%;display:block}
+.tabs{display:flex;gap:8px;margin:10px 0;flex-wrap:wrap}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:8px 2px}
+button,select{font:inherit;padding:5px 12px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);cursor:pointer}
+button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+button.busy{background:#e8742a!important;border-color:#e8742a!important;color:#fff!important;cursor:wait;animation:busyp 1s ease-in-out infinite}
+@keyframes busyp{50%{opacity:.55}}
+.tabs button{font-weight:600;padding:7px 16px}
+input[type=range]{width:100%}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px 22px}.grid label{display:flex;flex-direction:column;gap:2px}.grid .chk{flex-direction:row;align-items:center;gap:8px}
+.sect{font-weight:600;margin:8px 0 4px;color:var(--mut);font-size:13px;text-transform:uppercase;letter-spacing:.04em}
+.kpi{display:grid;grid-template-columns:auto repeat(4,1fr);gap:4px 16px;font-variant-numeric:tabular-nums}
+.kpi div.h{color:var(--mut);font-size:13px}.kpi b{font-size:17px}
+.leg{display:flex;gap:16px;flex-wrap:wrap;color:var(--mut);font-size:13px;margin:4px 2px}
+.leg i{display:inline-block;width:18px;height:3px;vertical-align:4px;margin-right:5px}
+.note{border-left:4px solid var(--acc);padding:6px 12px;background:var(--card);border-radius:0 6px 6px 0;margin-bottom:12px}
+.hid{display:none!important}
+.sub{border:1px solid var(--line);border-left:5px solid var(--ok,#2e9e5b);border-radius:10px;padding:8px 14px 10px;margin:12px 0}.sub>summary{cursor:pointer;font-weight:700;font-size:17px;margin:2px 0 6px}</style></head><body><main>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:6px"><div><h1 style="margin:4px 0;font-size:40px;line-height:1.15">Simulation du convoi articulé</h1><!--NAV--></div><div style="display:flex;align-items:center;gap:22px"><img src="__LOGO_AMPERE__" alt="Laboratoire Ampère" style="height:110px"><img src="__LOGO__" alt="Kiwee by Metacar" style="height:110px"></div></div>
+<div class="tabs"><button id="tStr" class="on">Essais de volant</button><button id="tElk">Test de l'élan (ISO 3888-2)</button><button id="tSla">Slalom</button><button id="tTur">Virage</button><button id="tCir">Cercle (virage stabilisé)</button><button id="tUrb">Circuit urbain</button><button id="tBrk">Freinage en virage</button><button id="tDev">Ligne droite avec dévers</button></div>
+<div class="card">
+<div class="sect">Paramètres de simulation</div>
+<div class="grid">
+ <label><span>Nombre de portions N&nbsp;: <b id="vN">5</b></span><input type="range" id="iN" min="2" max="10" step="1" value="5"></label>
+ <label><span>Vitesse d'avance&nbsp;: <b id="vV">15</b> km/h</span><input type="range" id="iV" min="5" max="50" step="1" value="15"></label>
+ <label><span>Durée de simulation&nbsp;: <b id="vT">automatique</b></span><input type="range" id="iT" min="0" max="120" step="5" value="0"></label>
+ <label class="chk"><input type="checkbox" id="cmp"> comparer avec c = 0 (sans amortissement)</label>
+</div>
+<details id="advGsim" style="margin:8px 0 2px"><summary style="cursor:pointer;font-weight:600;color:var(--mut)">Paramètres avancés</summary>
+<div style="margin-left:16px">
+<details id="advM" style="margin:6px 0 4px"><summary style="cursor:pointer;font-weight:600;color:var(--mut)">Masses et longueurs</summary>
+<div class="grid" style="margin-top:8px">
+ <label><span>Masse de la portion de tête M₁ (kg)</span><input type="number" id="pM1" value="300" min="10" step="10"></label>
+ <label><span>Masse des portions intermédiaires M<sub>j</sub> (kg)</span><input type="number" id="pMj" value="500" min="10" step="10"></label>
+ <label><span>Masse de la portion de queue M<sub>n</sub> (kg)</span><input type="number" id="pMn" value="300" min="10" step="10"></label>
+ <label><span>Inertie de la tête I₁ (kg·m²)</span><input type="number" id="pI1" value="170" min="1" step="5"></label>
+ <label><span>Inertie des portions intermédiaires I<sub>j</sub> (kg·m²)</span><input type="number" id="pIj" value="150" min="1" step="5"></label>
+ <label><span>Inertie de la queue I<sub>n</sub> (kg·m²)</span><input type="number" id="pIn" value="100" min="1" step="5"></label>
+ <label><span>Longueur d'une portion L, entre articulations (m)</span><input type="number" id="pL" value="1.8" min="0.6" max="6" step="0.1"></label>
+ <label><span>Distance articulation J₁ – centre de gravité de la tête (m)</span><input type="number" id="pL1" value="0.6" min="0.1" step="0.05"></label>
+ <label><span>Distance articulation – centre de gravité de la queue (m)</span><input type="number" id="pLn" value="0.3" min="0.1" step="0.05"></label>
+</div>
+<div class="bar" style="margin-bottom:0"><button id="bRst">Valeurs par défaut</button></div></details>
+<details id="advP" style="margin:6px 0 4px"><summary style="cursor:pointer;font-weight:600;color:var(--mut)">Pneus</summary>
+<div class="grid" style="margin-top:8px">
+ <label class="chk" style="grid-column:1/-1"><input type="checkbox" id="iSatP" checked> saturation de l'effort des pneus (plafond μ·Fz, réglages ci-dessous)</label>
+
+ <label><span>Rigidité de dérive par pneu K<sub>t</sub> (N/rad)</span><input type="number" id="pKt" value="13600" min="500" step="500"></label>
+ <label><span>Coefficient d'adhérence μ</span><input type="number" id="iMu" value="0.8" min="0.1" max="1.5" step="0.05"></label>
+ <label><span>Effort latéral maximal par pneu (N), 0 : μ·F<sub>z</sub></span><input type="number" id="iFy" value="0" min="0" step="100"></label>
+</div></details>
+</div></details>
+<details id="subPil" class="sub"><summary>Commande pilote</summary>
+<div class="grid">
+ <label><span>Gain du pilote sur la direction&nbsp;: <b id="vG">1,0</b></span><input type="range" id="iG" min="0.3" max="3" step="0.1" value="1"></label>
+ <label><span>Récupération d'énergie au lever de pédale&nbsp;: <b id="vLift">20</b> % de la régénération max</span><input type="range" id="xLift" min="0" max="100" step="5" value="20"></label>
+</div>
+<div class="grid" id="pUrb" style="margin-top:8px">
+ <label><span>Accélération latérale de confort&nbsp;: <b id="vuA">1,5</b> m/s²</span><input type="range" id="uA" min="0.5" max="3" step="0.1" value="1.5"></label>
+ <label><span>Décélération avant les virages&nbsp;: <b id="vuD">2,5</b> m/s²</span><input type="range" id="uD" min="0.8" max="4" step="0.1" value="2.5"></label>
+ <label><span>Accélération en sortie&nbsp;: <b id="vuAc">1,2</b> m/s²</span><input type="range" id="uAc" min="0.3" max="2" step="0.1" value="1.2"></label>
+
+ <label><span>Piéton : distance d'apparition&nbsp;: <b id="vuPd">25</b> m</span><input type="range" id="uPd" min="10" max="50" step="1" value="25"></label>
+ <label><span>Piéton : temps de réaction&nbsp;: <b id="vuPt">0,6</b> s</span><input type="range" id="uPt" min="0.2" max="1.5" step="0.1" value="0.6"></label>
+ <label><span>Évitement : distance d'apparition&nbsp;: <b id="vuEd">40</b> m</span><input type="range" id="uEd" min="20" max="70" step="1" value="40"></label>
+ <label><span>Évitement : décalage latéral&nbsp;: <b id="vuEa">2,0</b> m</span><input type="range" id="uEa" min="1" max="4" step="0.1" value="2"></label>
+ <label><span>Décélération d'urgence&nbsp;: <b id="vuPa">7,0</b> m/s²</span><input type="range" id="uPa" min="3" max="9" step="0.5" value="7"></label>
+</div>
+</details>
+<details id="subArt" class="sub"><summary>Commande des articulations</summary>
+<div class="grid">
+ <label><span>Amortissement moyen des articulations c&nbsp;: <b id="vC">3000</b> N·m·s/rad</span><input type="range" id="iC" min="0" max="1000" step="1" value="173"></label>
+ 
+ <div style="display:flex;align-items:center;gap:28px;flex-wrap:wrap;grid-column:1/-1;margin:2px 0"><label class="chk" style="display:flex;flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="vOn" checked> <b>Dynamique des vérins</b></label><label class="chk" style="display:flex;flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="vFree"> vérins non contrôlés (vanne ouverte, articulation libre)</label><label class="chk" style="display:flex;flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="vpFb"> boucle fermée sur l'effort</label></div>
+</div>
+<div class="sect">Répartition de l'amortissement le long du convoi</div>
+<div class="grid">
+ <label class="chk" style="grid-column:1/-1"><input type="checkbox" id="iAuto" checked> c et répartition optimisés selon N et la vitesse (calculés pour N = 3 à 10 et 10 à 40 km/h ; table selon vérins dynamiques et vectoring)</label>
+ <label class="chk" style="grid-column:1/-1"><input type="checkbox" id="iAdapt" checked> adapter c en direct selon la vitesse instantanée du convoi (mise à jour pendant la simulation, filtre 0,5 s)</label>
+ <div id="optWarn" style="grid-column:1/-1;color:var(--ghost);font-size:13px;display:none"></div>
+ <label><span>Loi de répartition</span><select id="rMode"><option value="unif">uniforme</option><option value="lin">linéaire</option><option value="poly">polynomiale</option><option value="gauss">gaussienne</option></select></label>
+ <label id="rL" class="hid"><span>Pente&nbsp;: <b id="vRs">+0,0</b> (+ : plus à l'avant, − : plus à l'arrière)</span><input type="range" id="rs" min="-1" max="1" step="0.05" value="0"></label>
+ <label id="rP1" class="hid"><span>Côté renforcé</span><select id="rSide"><option value="front">avant</option><option value="rear">arrière</option></select></label>
+ <label id="rP2" class="hid"><span>Degré du polynôme p&nbsp;: <b id="vRp">3</b></span><input type="range" id="rp" min="1" max="8" step="1" value="3"></label>
+ <label id="rG1" class="hid"><span>Centre de la gaussienne&nbsp;: <b id="vRg0">0,50</b> (0 : avant, 1 : arrière)</span><input type="range" id="rg0" min="0" max="1" step="0.05" value="0.5"></label>
+ <label id="rG2" class="hid"><span>Largeur σ&nbsp;: <b id="vRgs">0,20</b></span><input type="range" id="rgs" min="0.05" max="1" step="0.05" value="0.2"></label>
+ <label id="rP3" class="hid"><span>Plancher ε&nbsp;: <b id="vRe">0,10</b></span><input type="range" id="re" min="0" max="1" step="0.05" value="0.1"></label>
+</div>
+<canvas id="cd" width="1100" height="110"></canvas>
+<details id="advGart" style="margin:8px 0 2px"><summary style="cursor:pointer;font-weight:600;color:var(--mut)">Paramètres avancés</summary>
+<div style="margin-left:16px">
+<div class="grid" style="margin-top:8px">
+  <label style="grid-column:1/-1"><span>Vitesse minimale de déplacement de la tige pour piloter un vérin (mm/s) : en dessous, vanne ouverte</span><input type="number" id="vSeuilT" value="3" min="0" step="0.5" style="width:90px"></label> <label style="grid-column:1/-1"><span>Vitesse minimale du convoi pour piloter les vérins (km/h) : 0 = aucune</span><input type="number" id="vSeuil" value="0" min="0" step="1" style="width:90px"></label> <label class="chk" style="grid-column:1/-1"><input type="checkbox" id="iL" checked> 1ʳᵉ articulation bloquée</label>
+ <label class="chk" style="grid-column:1/-1"><input type="checkbox" id="iSat" checked> saturer les couples d'articulation à ±<input type="number" id="iMs" value="2500" min="100" step="100" style="width:90px;font:inherit;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)"> N·m</label>
+</div>
+<details id="advV" style="margin:6px 0 4px"><summary style="cursor:pointer;font-weight:600;color:var(--mut)">Vérin</summary>
+<div class="grid" style="margin-top:8px">
+ <label><span>Diamètre du piston (mm)</span><input type="number" id="vpDp" value="32" min="10" step="1"></label>
+ <label><span>Diamètre de la tige (mm)</span><input type="number" id="vpDt" value="20" min="5" step="1"></label>
+ <label><span>P<sub>charge</sub> (bar)</span><input type="number" id="vpPc" value="15" min="1" step="1"></label>
+ <label><span>Précharge de l'accumulateur P₀ (bar)</span><input type="number" id="vpP0" value="10" min="1" step="1"></label>
+ <label><span>Volume de l'accumulateur V₀ (mL)</span><input type="number" id="vpV0" value="160" min="10" step="10"></label>
+ <label><span>Module de compressibilité B (GPa)</span><input type="number" id="vpB" value="1.5" min="0.2" step="0.1"></label>
+ <label><span>Limiteur de pression (bar)</span><input type="number" id="vpPlim" value="200" min="20" step="10"></label>
+</div></details>
+<details id="advPid" style="margin:6px 0 4px"><summary style="cursor:pointer;font-weight:600;color:var(--mut)">PID des vérins</summary>
+<div class="grid" style="margin-top:8px">
+ <label><span>K<sub>p</sub></span><input type="number" id="vpKp" value="0.5" min="0" step="0.1"></label>
+ <label><span>K<sub>i</sub> (s⁻¹)</span><input type="number" id="vpKi" value="5" min="0" step="1"></label>
+</div></details>
+<details id="advVa" style="margin:6px 0 4px"><summary style="cursor:pointer;font-weight:600;color:var(--mut)">Vanne</summary>
+<div class="grid" style="margin-top:8px">
+ <label><span>Vanne : pulsation propre ω<sub>n</sub> (rad/s)</span><input type="number" id="vpWn" value="20" min="1" step="1"></label>
+ <label><span>Vanne : amortissement ζ</span><input type="number" id="vpZ" value="0.9" min="0.1" step="0.1"></label>
+ <label><span>Facteur sur la section K de la table constructeur</span><input type="number" id="vpKs" value="1" min="0.1" step="0.1"></label>
+ <label><span>Courant min (A)</span><input type="number" id="vpImin" step="0.01"></label>
+ <label><span>Courant max (A)</span><input type="number" id="vpImax" step="0.01"></label>
+</div></details>
+<details id="advMi" style="margin:6px 0 4px"><summary style="cursor:pointer;font-weight:600;color:var(--mut)">Modèle inverse</summary>
+<div class="grid" style="margin-top:8px">
+ <label><span>Loi de commande : α (Pa·s²·m⁻²·A²)</span><input type="number" id="vpAlpha" step="any"></label>
+ <label><span>Loi de commande : I₀ (A)</span><input type="number" id="vpI0" step="0.001"></label>
+</div></details>
+<details id="advG" style="margin:6px 0 4px"><summary style="cursor:pointer;font-weight:600;color:var(--mut)">Géométrie de l'articulation</summary>
+<div class="grid" style="margin-top:8px">
+ <label><span>Rayon des bras R₁ (m)</span><input type="number" id="vpR1" value="0.15" min="0.05" step="0.01"></label>
+ <label><span>Entraxe des ancrages L₂ (m)</span><input type="number" id="vpL2" value="0.9" min="0.2" step="0.05"></label>
+ <label><span>Calage angulaire φ (°)</span><input type="number" id="vpPhi" value="20" step="1"></label>
+ <label><span>Longueur de vérin au repos λ₀ (m)</span><input type="number" id="vpLam0" value="0.465" min="0.2" step="0.005"></label>
+</div></details>
+</div></details>
+</details>
+<details id="subVec" class="sub"><summary>Commande vectoring</summary>
+<div class="grid">
+<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;grid-column:1/-1;margin:2px 0"><label class="chk" style="display:flex;flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="xOn" checked> <b>Activer le vectoring</b></label></div>
+</div>
+<details id="advGvec" style="margin:8px 0 2px"><summary style="cursor:pointer;font-weight:600;color:var(--mut)">Paramètres avancés</summary>
+<div style="margin-left:16px">
+<div class="grid" style="margin-top:8px">
+ <label><span>k<sub>ω</sub> (s⁻¹)</span><input type="number" id="xKw" value="10" min="0" step="1"></label>
+ <label><span>k<sub>d</sub> (s⁻¹)</span><input type="number" id="xKd" value="10" min="0" step="1"></label>
+ <label><span>Couple moteur</span><select id="xTq"><option value="100">mesures, régénération 100 A</option><option value="50">mesures, régénération 50 A</option><option value="cst">constant</option></select></label>
+ <label><span>Couple max constant (N·m)</span><input type="number" id="xTm" value="250" min="0" step="10"></label>
+ <label><span>Demi-voie des roues motrices (m)</span><input type="number" id="xE" value="0.46" min="0.1" step="0.05"></label>
+ <label><span>Demi-voie, portion arrière (m)</span><input type="number" id="xEt" value="0.46" min="0.1" step="0.05"></label>
+ <label><span>Vitesse minimale d'activation (km/h)</span><input type="number" id="xVm" value="10" min="0" step="1"></label>
+ <label><span>Rayon de roue (m)</span><input type="number" id="xRf" value="0.23" min="0.1" step="0.01"></label>
+</div>
+</div></details>
+</details>
+<!--DEGRADE_UI-->
+<div class="sect">Trajectoire</div>
+<div class="grid hid" id="oBrk">
+ <label><span>Sens&nbsp;</span><select id="bDir"><option value="left">virage à gauche</option><option value="right">virage à droite</option></select></label>
+ <label><span>Rayon&nbsp;: <b id="vBR">20</b> m</span><input type="range" id="bR" min="4" max="40" step="1" value="20"></label>
+ <label><span>Angle du virage&nbsp;: <b id="vBA">90</b>°</span><input type="range" id="bAng" min="30" max="180" step="5" value="90"></label>
+ <label><span>Droite d'entrée&nbsp;: <b id="vBL">15</b> m</span><input type="range" id="bLead" min="5" max="30" step="1" value="15"></label>
+ <label><span>Décélération&nbsp;: <b id="vBD">3,0</b> m/s²</span><input type="range" id="bDec" min="0.5" max="6" step="0.5" value="3"></label>
+ <label><span>Début du freinage&nbsp;: <b id="vBF">30</b> % de l'arc</span><input type="range" id="bFrac" min="0" max="100" step="5" value="30"></label>
+ <label><span>Largeur du couloir&nbsp;: <b id="vBW">2,5</b> m</span><input type="range" id="bW" min="1.8" max="5" step="0.1" value="2.5"></label>
+ <label><span>Vitesse finale&nbsp;: <b id="vBV">5</b> km/h</span><input type="range" id="bVend" min="0" max="40" step="1" value="5"></label>
+</div>
+<div class="grid hid" id="oDev">
+ <label><span>Longueur de la ligne droite&nbsp;: <b id="vDL">100</b> m</span><input type="range" id="dLen" min="20" max="300" step="10" value="100"></label>
+ <label><span>Dévers (pente transversale)&nbsp;: <b id="vDD">8</b>°</span><input type="range" id="dDeg" min="0" max="20" step="1" value="8"></label>
+ <label><span>Pente vers&nbsp;</span><select id="dDir"><option value="right">la droite</option><option value="left">la gauche</option></select></label>
+</div>
+<div class="grid hid" id="oElk">
+ <label><span>Trajectoire de référence</span><select id="eMode"><option value="axe">axe des couloirs</option><option value="bords">bords (comme un conducteur)</option></select></label>
+</div>
+<div class="grid hid" id="oSla">
+ <label><span>Amplitude&nbsp;: <b id="vSA">1,5</b> m</span><input type="range" id="sA" min="0.5" max="3" step="0.1" value="1.5"></label>
+ <label><span>Espacement des plots&nbsp;: <b id="vSL">12</b> m</span><input type="range" id="sL" min="6" max="25" step="1" value="12"></label>
+ <label><span>Nombre de plots&nbsp;: <b id="vSN">5</b></span><input type="range" id="sN" min="3" max="10" step="1" value="5"></label>
+ <label><span>Ligne droite finale&nbsp;: <b id="vST">15</b> m</span><input type="range" id="sT" min="0" max="40" step="1" value="15"></label>
+</div>
+<div class="grid hid" id="oUrb">
+ <div style="grid-column:1/-1;display:flex;align-items:center;gap:18px;flex-wrap:wrap"><label class="chk" style="display:flex;flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="uPed"> <b>Manœuvres d'urgence aléatoires</b></label><label id="uPedL" class="hid" style="display:flex;flex-direction:row;align-items:center;gap:8px">graine&nbsp;<input type="number" id="uPedSeed" value="1" min="1" step="1" style="width:80px"><button id="uPedNew" type="button">Nouveau tirage</button>&nbsp;&nbsp;nombre&nbsp;<input type="number" id="uEvN" value="2" min="1" max="4" step="1" style="width:56px">&nbsp;&nbsp;<label class="chk" style="display:flex;flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="uEvP" checked>piéton (freinage)</label><label class="chk" style="display:flex;flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="uEvE" checked>obstacle (évitement)</label></label></div>
+ <div style="grid-column:1/-1"><div style="color:var(--mut);font-size:13px;margin-bottom:4px">Aperçu du circuit (départ en vert, arrivée en rouge)&nbsp;: <b id="uPrevInfo"></b></div><canvas id="uPrev" width="640" height="300" style="width:100%;max-width:640px;border:1px solid var(--line);border-radius:8px;background:var(--card)"></canvas></div>
+ <label><span>Circuit&nbsp;</span><select id="uMode"><option value="std">circuit standard</option><option value="rand">circuit généré aléatoirement</option></select></label>
+ <label id="uSeedL" class="hid"><span>Graine du tirage&nbsp;</span><span style="display:flex;gap:6px"><input type="number" id="uSeed" value="1" min="1" step="1" style="width:90px"><button id="uNew" type="button">Nouveau tirage</button></span></label>
+ <label><span>Largeur de la voie (plots)&nbsp;: <b id="vuW">3,0</b> m</span><input type="range" id="uW" min="2.4" max="5" step="0.1" value="3"></label>
+ <div style="grid-column:1/-1;color:var(--mut);font-size:13px">Circuit standard d'environ 660 m (le tirage aléatoire donne un circuit de 350 à 900 m sans croisement) : avenue de 80 m puis de 100 m, intersections à droite et à gauche (rayon 9 à 10 m), chicane, demi-tour de rond-point (rayon 13 m), virages serrés. Le curseur de vitesse donne la vitesse maximale (45 km/h en ville) : le convoi freine avant chaque virage pour respecter l'accélération latérale de confort, puis réaccélère en sortie.</div>
+</div>
+<div class="grid hid" id="oCir">
+ <label><span>Rayon du cercle&nbsp;: <b id="vkR">15</b> m</span><input type="range" id="kR" min="5" max="40" step="1" value="15"></label>
+ <label><span>Nombre de tours&nbsp;: <b id="vkN">2</b></span><input type="range" id="kN" min="1" max="4" step="1" value="2"></label>
+ <label><span>Vitesse finale&nbsp;: <b id="vkV1">30</b> km/h</span><input type="range" id="kV1" min="5" max="60" step="1" value="30"></label>
+ <label><span>Accélération le long du cercle&nbsp;: <b id="vkA">0,1</b> m/s²</span><input type="range" id="kA" min="0.02" max="0.5" step="0.02" value="0.1"></label>
+ <label><span>Sens&nbsp;</span><select id="kDir"><option value="left">à gauche</option><option value="right">à droite</option></select></label>
+</div>
+<div class="grid" id="oStr">
+ <label><span>Type d'essai&nbsp;</span><select id="qK"><option value="step">échelon de volant</option><option value="pulse">impulsion de volant</option><option value="doublet">impulsion gauche-droite (doublet)</option><option value="sine">sinus de volant</option><option value="chirp">balayage en fréquence (chirp)</option><option value="swd">sinus avec palier (sine with dwell)</option></select></label>
+ <label><span>Amplitude&nbsp;: <b id="vqAm">3</b>° (volant à la roue)</span><input type="range" id="qAm" min="0.5" max="15" step="0.5" value="3"></label>
+ <label><span>Début de l'essai&nbsp;: <b id="vqT0">2</b> s</span><input type="range" id="qT0" min="0" max="10" step="0.5" value="2"></label>
+ <label id="qDuL"><span>Durée&nbsp;: <b id="vqDu">1</b> s</span><input type="range" id="qDu" min="0.2" max="20" step="0.2" value="1"></label>
+ <label id="qFL"><span>Fréquence&nbsp;: <b id="vqF">0,5</b> Hz</span><input type="range" id="qF" min="0.1" max="3" step="0.1" value="0.5"></label>
+ <label id="qF1L"><span>Fréquence finale&nbsp;: <b id="vqF1">2</b> Hz</span><input type="range" id="qF1" min="0.2" max="4" step="0.1" value="2"></label>
+ <label><span>Durée de l'essai&nbsp;: <b id="vqD">15</b> s</span><input type="range" id="qD" min="10" max="60" step="5" value="15"></label>
+</div>
+<div class="grid hid" id="oTur">
+ <label><span>Sens&nbsp;</span><select id="tDir"><option value="left">virage à gauche</option><option value="right">virage à droite</option></select></label>
+ <label><span>Rayon&nbsp;: <b id="vTR">12</b> m</span><input type="range" id="tR" min="4" max="40" step="1" value="12"></label>
+ <label><span>Angle du virage&nbsp;: <b id="vTA">90</b>°</span><input type="range" id="tAng" min="30" max="180" step="5" value="90"></label>
+ <label><span>Droite d'entrée&nbsp;: <b id="vTL">10</b> m</span><input type="range" id="tLead" min="5" max="30" step="1" value="10"></label>
+ <label><span>Largeur du couloir&nbsp;: <b id="vTW">2,5</b> m</span><input type="range" id="tW" min="1.8" max="5" step="0.1" value="2.5"></label>
+ <label class="chk" style="grid-column:1/-1"><input type="checkbox" id="tRel"> lâcher des gaz à l'entrée du virage (sans freiner)</label>
+</div>
+<details id="advC" style="margin:6px 0 4px"><summary style="cursor:pointer;font-weight:600;color:var(--mut)">Courbes affichées</summary>
+<div class="grid" style="margin-top:8px">
+ <label class="chk"><input type="checkbox" class="showc" data-c="ov" checked> vue d'ensemble des trajectoires</label>
+ <label class="chk"><input type="checkbox" class="showc" data-c="gr" checked> écart latéral et braquage de la tête</label>
+ <label class="chk"><input type="checkbox" class="showc" data-c="gt" checked> couples d'articulation</label>
+ <label class="chk"><input type="checkbox" class="showc" data-c="gd" checked> déport queue / tête</label>
+ <label class="chk"><input type="checkbox" class="showc" data-c="ga" checked> accélérations latérales</label>
+ <label class="chk"><input type="checkbox" class="showc" data-c="gf" checked> efforts latéraux des pneus</label>
+ <label class="chk"><input type="checkbox" class="showc" data-c="rw" checked> rearward amplification</label>
+ <label class="chk"><input type="checkbox" class="showc" data-c="kpi" checked> tableau des erreurs</label>
+ <label class="chk"><input type="checkbox" class="showc" data-c="gs" checked> vitesse (freinage en virage)</label>
+ <label class="chk"><input type="checkbox" class="showc" data-c="gc" checked> consigne et couple réel des vérins</label>
+ <label class="chk"><input type="checkbox" class="showc" data-c="gi" checked> courants des vannes (vérins)</label>
+ <label class="chk"><input type="checkbox" class="showc" data-c="gv" checked> efforts des vérins (vérins)</label>
+</div></details>
+<div class="bar" style="margin-bottom:0"><button id="bSim" class="on">▶ Simuler</button><span id="rSim" style="color:var(--mut)"></span></div>
+</div>
+<div class="card"><canvas id="cv" width="1280" height="640"></canvas>
+</div>
+<div class="bar">
+<button id="play">⏸ Pause</button><button id="rst">↺ Rejouer</button>
+<label>Vitesse <select id="spd"><option value="1" selected>×1</option><option value="2">×2</option><option value="4">×4</option><option value="0.5">×0,5</option></select></label>
+<input type="range" id="tm" min="0" max="1000" value="0" style="flex:1;min-width:160px;width:auto">
+<label style="white-space:nowrap"><input type="checkbox" id="fr" checked> efforts</label>
+<span>t = <b id="rt">0,0</b> s</span>
+</div>
+<div class="card"><canvas id="ov" width="1100" height="220"></canvas></div>
+<div class="card"><canvas id="gr" width="1100" height="230"></canvas></div>
+<div class="card"><canvas id="gt" width="1100" height="250"></canvas></div>
+<div class="card" id="cS" style="display:none"><canvas id="gs" width="1100" height="230"></canvas></div>
+<div class="card" id="cC" style="display:none"><div style="display:flex;align-items:center;gap:10px;margin:0 0 6px"><label for="selArt" style="color:var(--mut)">Articulation affichée</label><select id="selArt"></select></div><canvas id="gc" width="1100" height="250"></canvas></div>
+<div class="card" id="cI" style="display:none"><canvas id="gi" width="1100" height="250"></canvas></div>
+<div class="card" id="cV" style="display:none"><canvas id="gv" width="1100" height="250"></canvas></div>
+<div class="card"><canvas id="gd" width="1100" height="230"></canvas></div>
+<div class="card" id="cZ" style="display:none"><canvas id="gz" width="1100" height="250"></canvas></div>
+<div class="card"><canvas id="ga" width="1100" height="250"></canvas></div>
+<div class="card"><canvas id="gf" width="1100" height="250"></canvas></div>
+<div class="card"><div class="kpi" id="kpi"></div></div>
+<div class="note" id="msg"></div>
+<div class="card hid" id="campCard"></div>
+<div class="card hid" id="repCard"></div>
+<div class="card"><div class="sect">Rearward amplification (amplification vers l'arrière)</div>
+<canvas id="rw" width="1100" height="230"></canvas>
+<div class="kpi" id="rwk" style="margin-top:8px;grid-template-columns:auto repeat(3,1fr)"></div>
+<p style="color:var(--mut);font-size:13px;margin:8px 2px 0">RWA = accélération latérale maximale de la dernière portion / accélération latérale maximale de la première portion (au centre de gravité, ISO 14791). Une valeur supérieure à 1 signifie que la manœuvre est amplifiée vers l'arrière du convoi. Les accélérations sont calculées sur la trajectoire simulée.</p></div>
+</main>
+<script>
+/*MOTEUR*/
+let GLEN = 1.8;
+const $ = id => document.getElementById(id);
+const ADV_IDS = [
+  ['pM1', 'M1'],
+  ['pMj', 'Mj'],
+  ['pMn', 'Mn'],
+  ['pI1', 'I1'],
+  ['pIj', 'Ij'],
+  ['pIn', 'In'],
+  ['pL', 'L'],
+  ['pL1', 'l1'],
+  ['pLn', 'ln'],
+  ['pKt', 'Kt']
+];
+const ADV_DEF = {};
+for (const [id] of ADV_IDS) ADV_DEF[id] = $(id).value;
+
+function advParams() {
+  const o = {};
+  for (const [id, k] of ADV_IDS) {
+    let v = parseFloat($(id).value);
+    const e = $(id);
+    const mn = parseFloat(e.min || 0);
+    if (!(v >= mn)) v = parseFloat(ADV_DEF[id]);
+    o[k] = v;
+  }
+  GLEN = o.L;
+  o.sat = $('iSatP').checked;
+  o.mu = parseFloat($('iMu').value) || 0.8;
+  o.fymax = parseFloat($('iFy').value) || 0;
+  return o;
+}
+
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt = (x, d) => x.toFixed(d).replace('.', ',');
+const cd = $('cd'),
+  cdx = cd.getContext('2d'),
+  cv = $('cv'),
+  cx = cv.getContext('2d'),
+  ov = $('ov'),
+  ox = ov.getContext('2d'),
+  gr = $('gr'),
+  gx = gr.getContext('2d');
+let traj = 'str',
+  R1 = null,
+  R0 = null,
+  t = 0,
+  playing = true,
+  spd = 1,
+  last = null,
+  TT = 1;
+const DTF = 0.03;
+
+function trajParams() {
+  if (traj == 'urb') return {
+    type: 'urban',
+    W: +$('uW').value,
+    tail: 10,
+    mode: $('uMode').value,
+    seed: +$('uSeed').value || 1
+  };
+  if (traj == 'cir') return {
+    type: 'turn',
+    R: +$('kR').value,
+    alpha: 360 * (+$('kN').value),
+    dir: $('kDir').value == 'left' ? 1 : -1,
+    lead: 10,
+    tail: 15,
+    W: 0
+  };
+  if (traj == 'str') return {
+    type: 'line',
+    len: Math.max(80, (+$('iV').value) / 3.6 * (+$('qD').value) + 60)
+  };
+  if (traj == 'brake') return {
+    type: 'brake',
+    R: +$('bR').value,
+    alpha: +$('bAng').value,
+    dir: $('bDir').value == 'left' ? 1 : -1,
+    lead: +$('bLead').value,
+    tail: 20,
+    W: +$('bW').value
+  };
+  if (traj == 'dev') return {
+    type: 'line',
+    len: +$('dLen').value
+  };
+  if (traj == 'elk') return {
+    type: 'elkiso',
+    mode: $('eMode').value,
+    b: 1.5,
+    x0: 25,
+    tail: 25
+  };
+  if (traj == 'slalom') return {
+    type: 'slalom',
+    A: +$('sA').value,
+    lam: +$('sL').value,
+    ncones: +$('sN').value,
+    lead: 12,
+    tail: +$('sT').value
+  };
+  return {
+    type: 'turn',
+    R: +$('tR').value,
+    alpha: +$('tAng').value,
+    dir: $('tDir').value == 'left' ? 1 : -1,
+    lead: +$('tLead').value,
+    tail: 20,
+    W: +$('tW').value,
+    release: $('tRel').checked
+  };
+}
+
+function vecOpts() {
+  return $('xOn').checked ? {
+    on: true,
+    kw: +$('xKw').value,
+    kd: +$('xKd').value,
+    vmin: +$('xVm').value || 0,
+    Tmot: +$('xTm').value,
+    tab: $('xTq').value != 'cst',
+    reg: +$('xTq').value || 100,
+    e: +$('xE').value,
+    et: +$('xEt').value,
+    reff: +$('xRf').value
+  } : null;
+}
+
+function evParams() {
+  const ty = [];
+  if ($('uEvP').checked) ty.push('ped');
+  if ($('uEvE').checked) ty.push('ev');
+  return {
+    seed: +$('uPedSeed').value || 1,
+    n: Math.max(1, Math.min(4, +$('uEvN').value || 1)),
+    types: ty.length ? ty : ['ped'],
+    dApp: +$('uPd').value,
+    dEv: +$('uEd').value,
+    tr: +$('uPt').value,
+    aE: +$('uPa').value,
+    A: +$('uEa').value
+  };
+}
+
+function trajExtra() {
+  const e = {
+    cFun: ($('iAdapt').checked && $('iAuto').checked && !$('vFree').checked) ? mkCFun($('xOn').checked) : null,
+    lift: {
+      pct: +$('xLift').value || 0,
+      reg: +($('xTq').value) || 100,
+      reff: +$('xRf').value || 0.23
+    }
+  };
+  if (traj == 'urb') {
+    e.urbanAy = +$('uA').value;
+    e.urbanDec = +$('uD').value;
+    e.urbanAcc = +$('uAc').value;
+    if ($('uPed').checked) e.ev = evParams();
+  }
+  if (traj == 'cir') e.ramp = {
+    a: +$('kA').value,
+    V1: +$('kV1').value
+  };
+  if (traj == 'str') {
+    e.steer = steerParams();
+    e.Tmax = +$('qD').value;
+  }
+  return e;
+}
+
+function drawUrbPrev() {
+  if (traj != 'urb') return;
+  const cvp = $('uPrev'),
+    g = cvp.getContext('2d'),
+    W = cvp.width,
+    H = cvp.height,
+    p = makePath(trajParams());
+  let x0 = 1e9,
+    x1 = -1e9,
+    y0 = 1e9,
+    y1 = -1e9;
+  for (let k = 0; k < p.n; k += 10) {
+    x0 = Math.min(x0, p.xs[k]);
+    x1 = Math.max(x1, p.xs[k]);
+    y0 = Math.min(y0, p.ys[k]);
+    y1 = Math.max(y1, p.ys[k]);
+  }
+  const m = 18,
+    S = Math.min((W - 2 * m) / Math.max(1, x1 - x0), (H - 2 * m) / Math.max(1, y1 - y0)),
+    cx0 = (x0 + x1) / 2,
+    cy0 = (y0 + y1) / 2,
+    sc = (x, y) => [W / 2 + (x - cx0) * S, H / 2 - (y - cy0) * S];
+  g.clearRect(0, 0, W, H);
+  g.lineWidth = 2;
+  g.strokeStyle = css('--road');
+  g.beginPath();
+  for (let k = 0; k < p.n; k += 6) {
+    const q = sc(p.xs[k], p.ys[k]);
+    k ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]);
+  }
+  g.stroke();
+  g.fillStyle = '#f08a24';
+  for (const c of p.cones) {
+    const q = sc(c[0], c[1]);
+    g.beginPath();
+    g.arc(q[0], q[1], 1.3, 0, 7);
+    g.fill();
+  }
+  const a = sc(p.xs[0], p.ys[0]),
+    b = sc(p.xs[p.n - 1], p.ys[p.n - 1]);
+  g.fillStyle = '#2e9e5b';
+  g.beginPath();
+  g.arc(a[0], a[1], 6, 0, 7);
+  g.fill();
+  g.fillStyle = '#d0342c';
+  g.beginPath();
+  g.arc(b[0], b[1], 6, 0, 7);
+  g.fill();
+  const k5 = Math.min(p.n - 1, 400),
+    d = sc(p.xs[k5], p.ys[k5]);
+  g.strokeStyle = '#2e9e5b';
+  g.lineWidth = 2.5;
+  g.beginPath();
+  g.moveTo(a[0], a[1]);
+  g.lineTo(d[0], d[1]);
+  g.stroke(); // sens de départ
+  g.fillStyle = css('--mut');
+  g.strokeStyle = css('--mut');
+  g.lineWidth = 2;
+  g.font = '12px system-ui';
+  g.beginPath();
+  g.moveTo(12, H - 14);
+  g.lineTo(12 + 100 * S, H - 14);
+  g.moveTo(12, H - 18);
+  g.lineTo(12, H - 10);
+  g.moveTo(12 + 100 * S, H - 18);
+  g.lineTo(12 + 100 * S, H - 10);
+  g.stroke();
+  g.fillText('100 m', 16 + 100 * S, H - 10);
+  if ($('uPed').checked) {
+    const q = evParams();
+    drawEvents(g, pp => sc(pp[0], pp[1]), 5, 0, emergPlace(p, q.seed, q.n, q.types, +$('iV').value / 3.6));
+  }
+  $('uPrevInfo').textContent = Math.round(p.s[p.n - 1]) + ' m, ' + p.cones.length + ' plots';
+}
+
+function steerParams() {
+  return {
+    kind: $('qK').value,
+    amp: (+$('qAm').value) * Math.PI / 180,
+    t0: +$('qT0').value,
+    dur: +$('qDu').value,
+    f: +$('qF').value,
+    f1: +$('qF1').value
+  };
+}
+
+function qFields() {
+  const k = $('qK').value;
+  $('qDuL').style.display = (k == 'pulse' || k == 'chirp' || k == 'doublet') ? '' : 'none';
+  $('qFL').style.display = (k == 'sine' || k == 'chirp' || k == 'swd') ? '' : 'none';
+  $('qF1L').style.display = k == 'chirp' ? '' : 'none';
+}
+
+function weights(n) {
+  const mode = $('rMode').value,
+    g = [];
+  for (let k = 0; k < n; k++) {
+    const x = n > 1 ? k / (n - 1) : 0;
+    let v = 1;
+    if (mode == 'lin') v = Math.max(0, 1 + (+$('rs').value) * (1 - 2 * x));
+    else if (mode == 'poly') {
+      const u = $('rSide').value == 'front' ? 1 - x : x,
+        e = +$('re').value;
+      v = e + (1 - e) * Math.pow(u, +$('rp').value);
+    } else if (mode == 'gauss') {
+      const e = +$('re').value,
+        s = +$('rgs').value,
+        x0 = +$('rg0').value;
+      v = e + (1 - e) * Math.exp(-0.5 * Math.pow((x - x0) / s, 2));
+    }
+    g.push(v);
+  }
+  const m = g.reduce((a, b) => a + b, 0) / n || 1;
+  return g.map(v => v / m);
+}
+
+function cOf() {
+  const sv = +$('iC').value,
+    v = 100000 * (sv / 1000) ** 2;
+  return sv == 0 ? 0 : Math.round(v / (v < 1000 ? 10 : v < 10000 ? 100 : 1000)) * (v < 1000 ? 10 : v < 10000 ? 100 : 1000);
+}
+
+function ckArr(n) {
+  const c = cOf();
+  return weights(n).map(w => c * w);
+}
+
+function drawDist() {
+  const W = cd.width,
+    H = cd.height,
+    n = +$('iN').value - 1,
+    ck = ckArr(n),
+    mx = Math.max(1, ...ck),
+    dc = cdx;
+  dc.clearRect(0, 0, W, H);
+  const bw = Math.min(70, (W - 120) / Math.max(n, 1)),
+    x0 = 60;
+  dc.font = '12px system-ui';
+  for (let k = 0; k < n; k++) {
+    const h = (H - 34) * ck[k] / mx,
+      x = x0 + k * (bw + 8);
+    dc.fillStyle = (k == 0 && $('iL').checked) ? css('--line') : css('--acc');
+    dc.fillRect(x, H - 18 - h, bw, h);
+    dc.fillStyle = css('--ink');
+    dc.textAlign = 'center';
+    dc.fillText(String(Math.round(ck[k])), x + bw / 2, H - 22 - h);
+    dc.fillStyle = css('--mut');
+    dc.fillText('J' + (k + 2), x + bw / 2, H - 4);
+    dc.textAlign = 'left';
+  }
+}
+
+function rwaRun() {
+  rwaShow([{
+    r: rwaCompute(R1.frames),
+    col: '#3b8043',
+    label: 'c moyen = ' + cOf(),
+    bad: R1.status == 'diverge'
+  }].concat(R0 ? [{
+    r: rwaCompute(R0.frames),
+    col: '#d0342c',
+    label: 'c = 0',
+    alpha: .6,
+    bad: R0.status == 'diverge'
+  }] : []));
+}
+
+const TCOL = ['#3b8043', '#d4a800', '#79b28a', '#1b8a8f', '#8a9a1b', '#5b6b73', '#a6c84c', '#1d4d2b', '#c99700', '#9db8a6'];
+
+function drawTorque() {
+  const cvt = $('gt'),
+    g = cvt.getContext('2d'),
+    W = cvt.width,
+    H = cvt.height,
+    ml = 64,
+    mr = 14,
+    mt = 34,
+    mb = 30;
+  g.clearRect(0, 0, W, H);
+  const n = R1.frames[0].Ma.length,
+    k0 = R1.k0 || 0;
+  let ym = Math.max(1, R1.Mmax || 0);
+  const mx = Array(n).fill(0);
+  for (const f of R1.frames)
+    for (let k = k0; k < n; k++) {
+      ym = Math.max(ym, Math.abs(f.Ma[k]));
+      mx[k] = Math.max(mx[k], Math.abs(f.Ma[k]));
+    }
+  const nice = v => {
+    const p = Math.pow(10, Math.floor(Math.log10(v)));
+    const m = v / p;
+    return ([1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].find(x => m <= x)) * p;
+  };
+  ym = nice(ym * 1.05);
+  const X = tt => ml + tt / TT * (W - ml - mr),
+    Y = v => mt + (H - mt - mb) / 2 * (1 - v / ym);
+  g.font = '12px system-ui';
+  g.lineWidth = 1;
+  g.strokeStyle = css('--line');
+  g.fillStyle = css('--mut');
+  for (const v of [-ym, -ym / 2, 0, ym / 2, ym]) {
+    g.beginPath();
+    g.moveTo(ml, Y(v));
+    g.lineTo(W - mr, Y(v));
+    g.stroke();
+    g.fillText(Math.round(v).toLocaleString('fr-FR'), 6, Y(v) + 4);
+  }
+  for (let s = 0; s <= TT; s += Math.max(1, Math.round(TT / 6))) g.fillText(s + ' s', X(s) - 8, H - 10);
+  if (R1.Mmax) {
+    g.save();
+    g.setLineDash([6, 4]);
+    g.strokeStyle = css('--ghost');
+    g.lineWidth = 1.4;
+    for (const v of [-R1.Mmax, R1.Mmax]) {
+      g.beginPath();
+      g.moveTo(ml, Y(v));
+      g.lineTo(W - mr, Y(v));
+      g.stroke();
+    }
+    g.setLineDash([]);
+    g.fillStyle = css('--ghost');
+    g.fillText('saturation ± ' + Math.round(R1.Mmax).toLocaleString('fr-FR') + ' N·m', W - mr - 170, Y(R1.Mmax) - 4);
+    g.restore();
+  }
+  g.fillStyle = css('--ink');
+  g.fillText(R1.vin ? 'couples d\'articulation fournis par les vérins (N·m)' : 'couples de commande dans les articulations c_k(θ̇_{k+1} − θ̇_k)  (N·m)', 6, 14);
+  let lx = ml;
+  for (let k = k0; k < n; k++) {
+    g.fillStyle = TCOL[k % TCOL.length];
+    g.fillRect(lx, 22, 14, 3);
+    g.fillStyle = css('--mut');
+    const lab = 'J' + (k + 2) + ' (max ' + Math.round(mx[k]).toLocaleString('fr-FR') + ')';
+    g.fillText(lab, lx + 18, 27);
+    lx += g.measureText(lab).width + 40;
+  }
+  for (let k = k0; k < n; k++) {
+    g.strokeStyle = TCOL[k % TCOL.length];
+    g.lineWidth = 1.8;
+    g.beginPath();
+    let first = true;
+    for (const f of R1.frames) {
+      if (f.t > t) break;
+      first ? g.moveTo(X(f.t), Y(f.Ma[k])) : g.lineTo(X(f.t), Y(f.Ma[k]));
+      first = false;
+    }
+    g.stroke();
+  }
+}
+
+function vpRead() {
+  const g = id => +$(id).value;
+  return {
+    Dp: g('vpDp') / 1000,
+    Dt: g('vpDt') / 1000,
+    R1: g('vpR1'),
+    L2: g('vpL2'),
+    phi: g('vpPhi'),
+    lam0: g('vpLam0'),
+    Pc: g('vpPc') * 1e5,
+    Plim: g('vpPlim') * 1e5,
+    Ks: g('vpKs'),
+    P0: g('vpP0') * 1e5,
+    V0: g('vpV0') * 1e-6,
+    B: g('vpB') * 1e9,
+    wn: g('vpWn'),
+    zeta: g('vpZ'),
+    alpha: g('vpAlpha'),
+    I0: g('vpI0'),
+    Imin: g('vpImin'),
+    Imax: g('vpImax'),
+    estP2: true,
+    fb: $('vpFb').checked,
+    Kp: g('vpKp'),
+    Ki: g('vpKi'),
+    vrodMin: (+$('vSeuilT').value || 0) / 1000
+  };
+} {
+  const p = verinParams({});
+  $('vpAlpha').value = p.alpha.toExponential(3);
+  $('vpI0').value = p.I0.toFixed(3);
+  $('vpImin').value = p.Imin.toFixed(3);
+  $('vpImax').value = p.Imax.toFixed(3);
+}
+
+function seriesFromFrames(frames, key, n, k0) {
+  k0 = k0 || 0;
+  const y = [];
+  for (let k = k0; k < n; k++) y.push(frames.map(f => f[key][k]));
+  return {
+    t: frames.map(f => f.t),
+    y,
+    pos: true,
+    names: Array.from({
+      length: n - k0
+    }, (_, k) => 'J' + (k + k0 + 2))
+  };
+}
+const OPT = __OPT__; // c moyen, pente de répartition linéaire et manoeuvres divergentes, par vitesse (km/h) puis par N (voir optimisation/)
+let autoBusy = false;
+
+function optCfg(vecOn) {
+  return ($('vOn').checked ? 'verin' : 'ideal') + (vecOn ? 1 : 0);
+} // table d'optimisation : amortisseur idéal ou vérins dynamiques, avec ou sans vectoring
+function optFor(N, V, cfg) {
+  const T = OPT[cfg || optCfg($('xOn').checked)],
+    sp = Object.keys(T).map(Number).sort((a, b) => a - b);
+  if (!T[sp[0]][N]) return null;
+  const lo = sp.filter(s => s <= V).pop() ?? sp[0],
+    hi = sp.filter(s => s >= V)[0] ?? sp[sp.length - 1],
+    a = T[lo][N],
+    b = T[hi][N],
+    u = hi == lo ? 0 : Math.min(1, Math.max(0, (V - lo) / (hi - lo)));
+  return {
+    c: Math.exp(Math.log(a.c) * (1 - u) + Math.log(b.c) * u),
+    s: a.s * (1 - u) + b.s * u,
+    bad: (u < 0.5 ? a.bad : b.bad)
+  };
+}
+
+function mkCFun(vecOn) {
+  const N = +$('iN').value,
+    cfg = optCfg(vecOn); // c et répartition linéaire lus dans la table à la vitesse instantanée (au-dessous de 10 km/h : valeurs de 10 km/h)
+  return v => {
+    const o = optFor(N, Math.max(10, v * 3.6), cfg),
+      n = N - 1,
+      gg = [];
+    for (let k = 0; k < n; k++) {
+      const x = n > 1 ? k / (n - 1) : 0;
+      gg.push(Math.max(0, 1 + o.s * (1 - 2 * x)));
+    }
+    const mm = gg.reduce((p, q) => p + q, 0) / n || 1;
+    return gg.map(q => o.c * q / mm);
+  };
+}
+
+function applyOpt() {
+  if (!$('iAuto').checked) {
+    $('optWarn').style.display = 'none';
+    return;
+  }
+  const o = optFor(+$('iN').value, +$('iV').value);
+  if (!o) return;
+  autoBusy = true;
+  $('iC').value = Math.round(1000 * Math.sqrt(o.c / 100000));
+  $('vC').textContent = cOf();
+  $('rMode').value = 'lin';
+  $('rMode').onchange();
+  $('rs').value = o.s.toFixed(2);
+  const s = +$('rs').value;
+  $('vRs').textContent = (s >= 0 ? '+' : '−') + Math.abs(s).toFixed(2).replace('.', ',');
+  autoBusy = false;
+  drawDist();
+  const w = $('optWarn');
+  if (o.bad && o.bad.length) {
+    w.textContent = 'Attention : à cette vitesse, aucun réglage testé ne stabilise cette configuration (divergence en : ' + o.bad.join(', ') + ').';
+    w.style.display = '';
+  } else w.style.display = 'none';
+}
+/*DEGRADE_JS*/
+let simBusy = false;
+const simQ = [];
+
+function runAll(done) { // le bouton passe en orange « calcul en cours » avant le calcul (qui bloque l'interface), puis revient à son état normal
+  if (simBusy) {
+    if (typeof done === 'function') simQ.push(done);
+    return;
+  }
+  const b = $('bSim');
+  simBusy = true;
+  b.dataset.txt = b.textContent;
+  b.classList.add('busy');
+  b.disabled = true;
+  b.textContent = '⏳ Calcul en cours…';
+  let lance = false;
+  const go = () => {
+    if (lance) return;
+    lance = true;
+    try {
+      runAllCore();
+    } finally {
+      t = 0;
+      last = null;
+      if (R1) {
+        playing = true;
+        $('play').textContent = '⏸ Pause';
+      }
+      simBusy = false; // le calcul bloque l'interface : l'horloge de l'animation repart à zéro dès qu'il est fini
+      b.classList.remove('busy');
+      b.disabled = false;
+      b.textContent = b.dataset.txt || '▶ Simuler';
+      if (typeof done === 'function') done();
+      while (simQ.length) simQ.shift()();
+    }
+  };
+  requestAnimationFrame(() => setTimeout(go, 20));
+  setTimeout(go, 150);
+} // rAF : le bouton est repeint avant le calcul ; la minuterie de secours garantit le lancement si l'onglet est masqué
+function runAllCore() {
+  const N = +$('iN').value,
+    c0 = cOf(),
+    o = {
+      N,
+      V: +$('iV').value,
+      c: $('vFree').checked ? Array(N - 1).fill(0) : ckArr(N - 1),
+      gain: +$('iG').value,
+      traj: trajParams(),
+      brake: traj == 'brake' ? {
+        a: +$('bDec').value,
+        frac: +$('bFrac').value / 100,
+        Vend: +$('bVend').value
+      } : null,
+      slope: traj == 'dev' ? {
+        deg: +$('dDeg').value,
+        dir: $('dDir').value == 'right' ? 1 : -1
+      } : null,
+      init: traj == 'line' ? {
+        y0: +$('lY0').value / 100,
+        psi0: +$('lPsi').value
+      } : null,
+      Tmax: +$('iT').value || 0,
+      params: advParams(),
+      vec: vecOpts(),
+      vGate: {
+        vmin: +$('vSeuil').value || 0,
+        rod: +$('vSeuilT').value || 0
+      },
+      verin: $('vOn').checked,
+      vp: $('vOn').checked ? vpRead() : null,
+      Mmax: ($('iSat').checked ? Math.max(1, +$('iMs').value || 2500) : 0),
+      lock: $('iL').checked && N >= 2
+    };
+  if (window.getFaults) o.faults = getFaults();
+  Object.assign(o, trajExtra());
+  R1 = simulateClosed(o);
+  R1.steer = o.steer || null;
+  {
+    const Nn = R1.frames.length ? R1.frames[0].th.length : o.N,
+      pp = o.params || {};
+    R1.Mtot = (pp.M1 || 300) + Math.max(0, Nn - 2) * (pp.Mj || 500) + (pp.Mn || 300);
+  }
+  R1.coast = R1.path.sRelease !== undefined;
+  R1.noVec = o.vec ? simulateClosed({
+    ...o,
+    vec: null,
+    cFun: o.cFun ? mkCFun(false) : null
+  }) : null;
+  R1.Mmax = o.Mmax;
+  R1.k0 = (o.lock && o.N >= 2) ? 1 : 0;
+  {
+    const a = [];
+    for (const fr of R1.frames)
+      for (const x of fr.F) a.push(Math.abs(x));
+    a.sort((p, q) => p - q);
+    R1.Fsc = Math.max(1, a[Math.floor(a.length * 0.9)] || 1) / 60;
+  }
+  R0 = window.makeGhost ? makeGhost(o) : (($('cmp').checked && c0 > 0) ? simulateClosed({
+    ...o,
+    c: 0,
+    cFun: null
+  }) : null);
+  drawDist();
+  TT = Math.max(R1.tEnd, R0 ? R0.tEnd : 0, 0.1);
+  // cadrage de la vue d'ensemble
+  let a = [1e9, -1e9, 1e9, -1e9];
+  const upd = p => {
+    a[0] = Math.min(a[0], p[0]);
+    a[1] = Math.max(a[1], p[0]);
+    a[2] = Math.min(a[2], p[1]);
+    a[3] = Math.max(a[3], p[1]);
+  };
+  const pa = R1.path;
+  for (let k = 0; k < pa.n; k += 10) upd([pa.xs[k], pa.ys[k]]);
+  for (const R of [R1, R0])
+    if (R)
+      for (let i = 0; i < R.frames.length; i += 5)
+        for (const p of R.frames[i].J) upd(p);
+  R1.bb = a;
+  t = 0;
+  playing = true;
+  $('play').textContent = '⏸ Pause';
+  R1.vin = $('vOn').checked && R1.frames.length && R1.frames[0].Iv;
+  if (R1.vin) {
+    const n = R1.frames[0].Iv.length;
+    R1.cur = seriesFromFrames(R1.frames, 'Iv', n, R1.k0);
+    R1.fv = seriesFromFrames(R1.frames, 'Fv', n, R1.k0);
+  }
+  R1.brk = traj == 'brake';
+  $('cS').style.display = '';
+  R1.spd = buildSpd();
+  $('cI').style.display = $('cV').style.display = $('cC').style.display = R1.vin ? '' : 'none';
+  if (R1.vin) {
+    const n = R1.frames[0].Iv.length,
+      sel = $('selArt'),
+      old = sel.value;
+    sel.innerHTML = '';
+    for (let k = R1.k0 || 0; k < n; k++) {
+      const o = document.createElement('option');
+      o.value = k;
+      o.textContent = 'J' + (k + 2);
+      sel.appendChild(o);
+    }
+    sel.value = (old !== '' && +old < n && +old >= (R1.k0 || 0)) ? old : (R1.k0 || 0);
+  }
+  R1.vec = !!$('xOn').checked && R1.frames.length && R1.frames[0].Mzv;
+  if (R1.vec) {
+    R1.vecE = +$('xE').value;
+    R1.vecEt = +$('xEt').value;
+    R1.vecRef = +$('xRf').value || 0.23;
+    let mm = 1;
+    for (const fr of R1.frames)
+      for (const x of fr.Mzv) mm = Math.max(mm, Math.abs(x));
+    R1.vecMz = mm;
+  }
+  $('cZ').style.display = R1.vec ? '' : 'none';
+  if (R1.vec) {
+    const N = R1.frames[0].Mzv.length,
+      ks = [];
+    for (let k = 0; k < N; k++)
+      if (R1.frames.some(f => f.Mzv[k] !== 0)) ks.push(k);
+    R1.mz = {
+      t: R1.frames.map(f => f.t),
+      y: ks.map(k => R1.frames.map(f => f.Mzv[k])),
+      names: ks.map(k => 'portion ' + (k + 1))
+    };
+    if (!ks.length) R1.mz = {
+      t: [0, 1],
+      y: [
+        [0, 0]
+      ],
+      names: ['aucun']
+    };
+  }
+  R1.dep = deportCompute(R1.frames);
+  R1.acc = accSeries(R1.frames);
+  R1.frc = forceSeries(R1.frames);
+  if (R0) R0.dep = deportCompute(R0.frames);
+  kpi();
+  rwaRun();
+  if (window.afterRun) afterRun(o);
+}
+
+function drawPed(ctx, p, r, hit, txt) {
+  ctx.save();
+  ctx.fillStyle = hit ? '#d0342c' : '#ffd23f';
+  ctx.strokeStyle = hit ? '#ffffff' : '#1b1b1b';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(p[0], p[1], r, 0, 7);
+  ctx.fill();
+  ctx.stroke(); // repère du piéton : silhouette vue de dessus
+  ctx.beginPath();
+  ctx.arc(p[0], p[1], r * 2.2, 0, 7);
+  ctx.strokeStyle = hit ? '#d0342c' : '#ffd23f';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 3]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  if (txt) {
+    ctx.fillStyle = hit ? '#ff6b60' : '#ffd23f';
+    ctx.font = 'bold 15px system-ui';
+    const lw = ctx.measureText(txt).width,
+      xx = p[0] + r * 2.6 + lw > ctx.canvas.width - 6 ? p[0] - r * 2.6 - lw : p[0] + r * 2.6;
+    ctx.fillText(txt, xx, p[1] - r * 1.6);
+  }
+  ctx.restore();
+}
+
+function drawObst(ctx, sc, E, hit, txt) {
+  const c = Math.cos(E.psi),
+    s = Math.sin(E.psi),
+    pts = [
+      [-0.6, -0.4],
+      [0.6, -0.4],
+      [0.6, 0.4],
+      [-0.6, 0.4]
+    ].map(q => sc([E.x + q[0] * c - q[1] * s, E.y + q[0] * s + q[1] * c])); // obstacle (objet sur la voie, 1,2 × 0,8 m)
+  ctx.save();
+  ctx.fillStyle = hit ? '#d0342c' : '#ff9f1c';
+  ctx.strokeStyle = hit ? '#ffffff' : '#1b1b1b';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  if (txt) {
+    const p = sc([E.x, E.y]);
+    ctx.fillStyle = hit ? '#ff6b60' : '#ff9f1c';
+    ctx.font = 'bold 13px system-ui';
+    ctx.fillText(txt, p[0] + 14, p[1] - 14);
+  }
+  ctx.restore();
+}
+
+function drawZebra(ctx, sc, E) {
+  const c = Math.cos(E.psi),
+    s = Math.sin(E.psi);
+  ctx.save();
+  ctx.fillStyle = 'rgba(235,235,235,.55)'; // passage piéton : bandes en travers de la voie
+  for (let i = -3; i <= 3; i++) {
+    const u = i * 0.9,
+      q = [
+        [u - 0.25, -2.4],
+        [u + 0.25, -2.4],
+        [u + 0.25, 2.4],
+        [u - 0.25, 2.4]
+      ].map(p => sc([E.x + p[0] * c - p[1] * s, E.y + p[0] * s + p[1] * c]));
+    ctx.beginPath();
+    q.forEach((p, k) => k ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawEvents(ctx, sc, r, tt, preview) {
+  const evs = (preview ? preview : (R1 && R1.ev)) || [];
+  for (const E of evs) {
+    if (!preview && E.tGo !== undefined && tt >= E.tGo) continue;
+    const hit = !preview && E.hit && tt >= E.tHit;
+    if (E.type == 'ped') {
+      if (ctx === cx) drawZebra(ctx, sc, E);
+      drawPed(ctx, sc([E.x, E.y]), ctx === cx ? Math.max(10, r * 1.6) : r, hit, hit ? 'CONTACT !' : (ctx === cx ? '⚠ PIÉTON' : 'piéton'));
+    } else drawObst(ctx, sc, E, hit, hit ? 'CONTACT !' : 'obstacle');
+  }
+}
+
+function pedTxt(R) {
+  const L = (R && R.ev) || [];
+  if (!L.length) return '';
+  return ' — urgences : ' + L.map(P => {
+    const nm = P.type == 'ped' ? 'piéton' : 'obstacle';
+    if (P.hit) return nm + ' TOUCHÉ à ' + fmt(P.vHit * 3.6, 1) + ' km/h';
+    if (P.type == 'ped') return nm + ' évité : arrêt à ' + fmt(Math.max(0, P.s - (P.sStop !== undefined ? P.sStop : P.s)), 1) + ' m devant lui (freinage à ' + fmt((P.vBrake || 0) * 3.6, 1) + ' km/h)' + (P.tGo !== undefined ? ', puis le convoi repart' : '');
+    return nm + ' évité (distance mini ' + fmt(Math.max(0, P.dMin), 2) + ' m, apparu à ' + fmt(P.vApp !== undefined ? P.vApp * 3.6 : 0, 0) + ' km/h)';
+  }).join(' ; ');
+}
+
+function pedTxtOld(R) {
+  const P = R && R.ped;
+  if (!P) return '';
+  return P.hit ? ' — PIÉTON TOUCHÉ à ' + fmt(P.vHit * 3.6, 1) + ' km/h (freinage commencé à ' + fmt(P.vBrake * 3.6, 1) + ' km/h)' + (P.tGo !== undefined ? ', puis le convoi repart' : '') : ' — piéton évité : arrêt à ' + fmt(Math.max(0, P.s - (P.sStop !== undefined ? P.sStop : P.s)), 1) + ' m devant lui (freinage commencé à ' + fmt((P.vBrake || 0) * 3.6, 1) + ' km/h, distance de sécurité mini ' + fmt(Math.max(0, P.dMin), 2) + ' m)' + (P.tGo !== undefined ? ', puis le convoi repart' : '');
+}
+
+function verdict(R) {
+  if (!R) return '';
+  if (R.status == 'diverge') return 'divergence (le convoi ne suit plus la trajectoire)';
+  return (traj == 'str' ? 'essai de volant (déplacement latéral max de la queue ' : 'trajectoire suivie (erreur max de la queue ') + fmt(R.et * 100, 0) + ' cm)' + (R.hits ? ' — plots touchés : ' + R.hits.hit + ' / ' + R.hits.n : '') + pedTxt(R) + rwaTxt(R) + (traj == 'str' && R === R1 ? dampEst(R) : '');
+}
+
+function dampEst(R) {
+  if (!R || !R.steer || !R.frames || R.frames.length < 30) return '';
+  const fr = R.frames,
+    st = R.steer,
+    t0 = st.kind == 'pulse' ? st.t0 + st.dur : st.kind == 'doublet' ? st.t0 + 2 * st.dur : st.t0;
+  const y = fr.map(f => f.th[f.th.length - 1] - f.th[0]),
+    ex = [];
+  for (let i = 1; i < fr.length - 1; i++) {
+    if (fr[i].t < t0 + 0.3) continue;
+    if ((y[i] - y[i - 1]) * (y[i + 1] - y[i]) < 0) ex.push([fr[i].t, y[i]]);
+  }
+  const ds = [];
+  for (let i = 0; i + 2 < ex.length && ds.length < 3; i++) {
+    const a = Math.abs(ex[i][1]),
+      b = Math.abs(ex[i + 2][1]);
+    if (a > 2e-3 && b > 1e-4 && a > b) ds.push([Math.log(a / b), ex[i + 2][0] - ex[i][0]]);
+  }
+  if (!ds.length) return ' — pas d\'oscillation amortie mesurable (lacet tête-queue)';
+  const dl = ds.reduce((p, q) => p + q[0], 0) / ds.length,
+    T = ds.reduce((p, q) => p + q[1], 0) / ds.length,
+    z = dl / Math.sqrt(4 * Math.PI * Math.PI + dl * dl);
+  return ' — amortissement du mode d\'articulation : ζ ≈ ' + fmt(z, 2) + ' (f ≈ ' + fmt(1 / T, 2) + ' Hz)';
+}
+
+function rwaTxt(R) {
+  if (!R || !R.frames || R.frames.length < 6) return '';
+  try {
+    const q = rwaCompute(R.frames);
+    return q && isFinite(q.ra) ? ' — RWA : ' + fmt(q.ra, 2) : '';
+  } catch (e) {
+    return '';
+  }
+}
+
+function buildSpd() {
+  const runs = [
+    [R1, 'vitesse de la tête']
+  ];
+  if (R0) runs.push([R0, window.makeGhost ? 'cas nominal (sans défaut)' : 'cas sans amortissement (c = 0)']);
+  if (R1.noVec) runs.push([R1.noVec, 'sans vectoring']);
+  let base = runs[0][0];
+  for (const [R] of runs)
+    if (R.frames.length > base.frames.length) base = R;
+  const y = runs.map(([R]) => base.frames.map((f, i) => i < R.frames.length ? R.frames[i].v * 3.6 : null)),
+    names = runs.map(r => r[1]);
+  if (R1.brk || traj == 'urb') {
+    y.push(base.frames.map((f, i) => i < R1.frames.length ? R1.frames[i].vref * 3.6 : null));
+    names.push('consigne de vitesse');
+  }
+  R1.spdTitle = traj == 'urb' ? 'vitesse de la tête et vitesse de consigne (km/h) : freinages avant les virages' : R1.coast ? 'vitesse de la tête (km/h) : gaz relâchés à l\'entrée du premier couloir, V = vitesse d\'approche' : R1.brk ? 'vitesse de la tête et consigne de vitesse (km/h)' : 'vitesse de la tête (km/h)';
+  return {
+    t: base.frames.map(f => f.t),
+    y,
+    pos: true,
+    names
+  };
+}
+
+function kpi() {
+  const c = cOf(),
+    dist = $('rMode').value != 'unif',
+    rows = [
+      ['c moyen = ' + c + (dist ? ' (réparti)' : '') + (' ') + ( /*unité*/ ''), R1]
+    ];
+  if (R0) rows.push(['c = 0', R0]);
+  let h = '<div class="h"></div><div class="h">erreur max de la tête</div><div class="h">erreur max de la queue</div><div class="h">déport max de la queue</div><div class="h">braquage max · résultat</div>';
+  for (const [lab, R] of rows) {
+    const bad = R.status == 'diverge';
+    h += '<div><b>' + lab + '</b></div><div><b>' + fmt(R.eh * 100, 0) + '</b> cm</div><div><b>' + fmt(R.et * 100, 0) + '</b> cm</div><div><b>' + fmt(Math.max(...R.dep.map(p => Math.abs(p.d))) * 100, 0) + '</b> cm</div><div><b>' + fmt(R.dm, 0) + '</b>° · <span style="color:var(' + (bad ? '--ghost' : '--ok') + ')">' + (bad ? 'instable' : 'stable') + '</span></div>';
+  }
+  $('kpi').innerHTML = h;
+  $('rSim').textContent = verdict(R1) + (R0 ? ' — sans amortissement : ' + verdict(R0) : '');
+  $('msg').textContent = R0 && R0.status == 'diverge' && R1.status != 'diverge' ? 'Sans amortissement des articulations le convoi diverge (serpentement), avec c = ' + c + ' N·m·s/rad il suit la trajectoire.' : (R1.status == 'diverge' ? 'Avec ces paramètres le convoi diverge : essayer d\'augmenter c, de réduire la vitesse ou d\'adoucir la trajectoire.' : 'Le convoi suit la trajectoire. L\'écart de la queue par rapport à la tête vient du décalage dû à la longueur du convoi (« raccourci » en virage).');
+}
+
+function at(R, tt) {
+  const f = R.frames,
+    i = Math.min(f.length - 1, Math.floor(tt / DTF));
+  if (i >= f.length - 1) return f[f.length - 1];
+  const u = (tt - f[i].t) / DTF,
+    A = f[i],
+    B = f[i + 1],
+    mx = (x, y) => x + (y - x) * u,
+    mp = (P, Q) => P.map((p, k) => [mx(p[0], Q[k][0]), mx(p[1], Q[k][1])]);
+  return {
+    J: mp(A.J, B.J),
+    G: mp(A.G, B.G),
+    A: mp(A.A, B.A),
+    th: A.th.map((x, k) => mx(x, B.th[k])),
+    F: A.F.map((x, k) => mx(x, B.F[k])),
+    dl: mx(A.dl, B.dl),
+    eh: mx(A.eh, B.eh),
+    et: mx(A.et, B.et),
+    t: tt
+  };
+}
+
+function poly(ctx, pts, close) {
+  ctx.beginPath();
+  pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
+  if (close) ctx.closePath();
+}
+
+function drawConvoy(ctx, f, sc, S, dark, ghost) {
+  const N = f.th.length,
+    hw = 0.75,
+    len = GLEN,
+    ins = Math.min(0.56, GLEN * 0.31);
+  const P = (k, a, b) => {
+    const th = f.th[k],
+      nx = Math.cos(th),
+      ny = Math.sin(th),
+      J = f.J[k];
+    return sc([J[0] + a * nx - b * ny, J[1] + a * ny + b * nx]);
+  };
+  for (let k = 0; k < N; k++) {
+    let pts;
+    if (k == 0) pts = [
+      [0.09, hw],
+      [-len / 2 - 0.075, 0],
+      [0.09, -hw]
+    ];
+    else if (k == N - 1) pts = [
+      [0.075, 0],
+      [-len / 2 - 0.09, hw],
+      [-len / 2 - 0.09, -hw]
+    ];
+    else pts = [
+      [0.06, 0],
+      [-ins, hw],
+      [-len + ins, hw],
+      [-len - 0.06, 0],
+      [-len + ins, -hw],
+      [-ins, -hw]
+    ];
+    const V = pts.map(q => P(k, q[0], q[1])),
+      n = V.length,
+      r = (k == 0 || k == N - 1 ? 9 : 12);
+    ctx.beginPath();
+    ctx.moveTo((V[0][0] + V[1][0]) / 2, (V[0][1] + V[1][1]) / 2);
+    for (let i = 1; i <= n; i++) {
+      const c = V[i % n],
+        d = V[(i + 1) % n];
+      ctx.arcTo(c[0], c[1], (c[0] + d[0]) / 2, (c[1] + d[1]) / 2, r);
+    }
+    ctx.closePath();
+    ctx.fillStyle = k == 0 ? (dark ? 'rgba(228,196,60,.5)' : 'rgba(244,224,106,.7)') : (dark ? 'rgba(150,158,172,.35)' : 'rgba(150,158,172,.38)');
+    ctx.fill();
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = dark ? 'rgba(200,205,215,.35)' : 'rgba(120,128,140,.5)';
+    ctx.stroke();
+  }
+  // roues réelles, un seul essieu par portion : 4 pneus sur l'essieu pour les portions intermédiaires (2 extérieurs, 2 intérieurs motorisés), 2 pour la tête (directeurs) et la queue (motorisés)
+  // couleur d'un pneu moteur : vert = traction, violet = freinage avec récupération d'énergie, rouge = freinage pur (au-delà de la capacité de régénération)
+  const fi = (!ghost && R1 && R1.frames && R1.frames.length) ? R1.frames[Math.min(R1.frames.length - 1, Math.max(0, Math.floor(t / DTF)))] : null,
+    vf = (fi && R1.vec && R1.vecE) ? fi : null,
+    eI = (R1 && R1.vecE) || 0.46,
+    eT = (R1 && R1.vecEt) || 0.46,
+    wl = 0.5,
+    ww = 0.2;
+  const regSel = +($('xTq').value) || 100,
+    rw = (R1 && R1.vecRef) || 0.23,
+    Flim0 = (fi && typeof Tmot === 'function') ? Tmot(Math.abs(fi.v) * 3.6, -1, regSel) / rw : 800,
+    dv = window.driveAt ? window.driveAt(t) : null,
+    Flim = dv ? (dv.regOff ? 0 : Flim0 * dv.tqf) : Flim0; // limite de régénération par roue (courbes mesurées, défauts éventuels)
+  for (let k = 0; k < N; k++) {
+    const th = f.th[k],
+      cs = Math.cos(th),
+      sn = Math.sin(th),
+      Ak = f.A[k],
+      ang = th + (k == 0 ? f.dl : 0),
+      ek = k == N - 1 ? eT : eI,
+      pos = k == 0 ? [
+        [0.65, 'f']
+      ] : k == N - 1 ? [
+        [ek, 'm']
+      ] : [
+        [ek + 0.22, 'o'],
+        [ek, 'm']
+      ],
+      fcw = fi ? fi.Fc / N / 2 : 0,
+      fric = fi && !fi.Lr && (-fi.Fc / N > 20); // effort moteur commun par roue motrice ; fric : la régénération des 2 roues motrices ne suffit pas, les freins mécaniques agissent sur toutes les roues
+    for (const [off, typ] of pos)
+      for (const sd of [1, -1]) {
+        const w = sc([Ak[0] - sd * off * sn, Ak[1] + sd * off * cs]);
+        let col = typ == 'f' ? '#4a90d9' : (dark ? '#9aa0ab' : '#4d4d4d');
+        if (fric) col = 'rgba(208,52,44,.95)'; // freinage pur : toutes les roues de l'essieu (y compris les roues sans moteur) freinent
+        else if (fi && typ == 'm') {
+          const ba = (!ghost && window.battAt) ? window.battAt(k, t) : null,
+            fcw2 = ba && ((ba.empty && fcw > 0) || (ba.full && fcw < 0 && fi.Lr)) ? 0 : fcw,
+            Fw = fcw2 + (vf && k >= 1 ? (sd < 0 ? vf.Fnv[k] : vf.Fnl[k]) : 0);
+          if (Fw > 20) col = 'rgba(46,158,91,.95)';
+          else if (Fw < -20) col = 'rgba(142,68,173,.95)';
+        } // le vectoring ne fait que de la traction ou de la récupération : violet. Le rouge (frein mécanique) ne vient que du freinage demandé au convoi (fric)
+        const mf = (!ghost && typ == 'm' && window.motFail) ? window.motFail(k, sd, t) : false;
+        if (mf) col = '#0a0a0a';
+        const bt = (!ghost && typ == 'm' && window.battAt) ? window.battAt(k, t) : null; // batterie de la portion pleine (bague bleue) ou vide (bague orange)
+        const tf = (!ghost && sd > 0 && (typ == 'o' || typ == 'f') && window.tyreFail) ? window.tyreFail(k, t) : false;
+        if (tf) col = '#7a3b12';
+        ctx.save();
+        ctx.translate(w[0], w[1]);
+        ctx.rotate(-ang);
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.roundRect(-wl / 2 * S, -ww / 2 * S, wl * S, ww * S, 3);
+        ctx.fill();
+        if (mf || tf) {
+          ctx.strokeStyle = '#d0342c';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        } else if (bt) {
+          ctx.strokeStyle = bt.empty ? '#f5a623' : '#4aa3ff';
+          ctx.lineWidth = 2.4;
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+    const A = sc(Ak),
+      ha = k == 0 ? 0.65 : ek + 0.22;
+    ctx.strokeStyle = css('--ink');
+    ctx.globalAlpha = .55;
+    ctx.lineWidth = 1.2;
+    const e1 = sc([Ak[0] - ha * sn, Ak[1] + ha * cs]),
+      e2 = sc([Ak[0] + ha * sn, Ak[1] - ha * cs]);
+    ctx.beginPath();
+    ctx.moveTo(e1[0], e1[1]);
+    ctx.lineTo(e2[0], e2[1]);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  } // essieu
+  const k0 = R1 && R1.k0 || 0;
+  for (let k = Math.max(1, k0 + 1); k < N; k++) {
+    const st = (!ghost && window.artFault) ? window.artFault(k - 1, t) : null;
+    for (const sd of [1, -1]) {
+      const a = P(k - 1, -len + 0.7, sd * 0.62),
+        b = P(k, -0.25, sd * 0.3),
+        bad = st && st.cyl[sd > 0 ? 0 : 1],
+        pilote = (() => {
+          if (ghost || !fi) return false;
+          const ia = k - 1;
+          let ps = false,
+            sgn = 0; // vérin piloté : celui qui se comprime, tant que sa vanne est effectivement commandée (courant sous le maximum)
+          if (fi.Iv && fi.Iv[ia] !== undefined) {
+            ps = fi.Iv[ia] < (+$('vpImax').value || VDEF.Imax) - 0.01;
+            sgn = fi.Md[ia];
+          } else if (fi.Ma && fi.Ma[ia] !== undefined) {
+            ps = Math.abs(fi.Ma[ia]) > 20;
+            sgn = fi.Ma[ia];
+          }
+          return ps && sgn !== 0 && ((sgn > 0 ? 1 : 0) === (sd > 0 ? 0 : 1));
+        })(),
+        col = st && st.cyl[sd > 0 ? 0 : 1] ? st.cyl[sd > 0 ? 0 : 1] : (pilote ? (dark ? '#5b8dff' : '#2f6bff') : (dark ? '#6fb7c2' : '#0f7c8a'));
+      ctx.strokeStyle = col;
+      ctx.lineWidth = bad ? 5 : (pilote ? 4.6 : 3.5);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(a[0], a[1]);
+      ctx.lineTo(b[0], b[1]);
+      ctx.stroke();
+      const m = [a[0] * 0.45 + b[0] * 0.55, a[1] * 0.45 + b[1] * 0.55];
+      ctx.lineWidth = bad ? 8 : 6;
+      ctx.beginPath();
+      ctx.moveTo(m[0], m[1]);
+      ctx.lineTo(b[0], b[1]);
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+      ctx.fillStyle = dark ? '#222' : '#fff';
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1.5;
+      for (const q of [a, b]) {
+        ctx.beginPath();
+        ctx.arc(q[0], q[1], 2.6, 0, 7);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+  }
+  for (let k = 1; k < N; k++) {
+    const p = sc(f.J[k]),
+      st = (!ghost && window.artFault) ? window.artFault(k - 1, t) : null;
+    if (st && st.art) {
+      ctx.fillStyle = st.art + '55';
+      ctx.beginPath();
+      ctx.arc(p[0], p[1], 13, 0, 7);
+      ctx.fill();
+      ctx.strokeStyle = st.art;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(p[0], p[1], 10, 0, 7);
+      ctx.stroke();
+    }
+    ctx.fillStyle = st && st.art ? st.art : '#1237c4';
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], 5.5, 0, 7);
+    ctx.fill();
+  }
+  for (let k = 0; k < N; k++) {
+    const p = sc(f.G[k]);
+    ctx.fillStyle = '#ffee00';
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], 5, 0, 7);
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+let showF = true;
+
+function drawForces(ctx, f, sc, Fsc) {
+  for (let k = 0; k < f.th.length; k++) {
+    const A = sc(f.A[k]),
+      ang = f.th[k] + (k == 0 ? f.dl : 0),
+      ux = -Math.sin(ang),
+      uy = Math.cos(ang);
+    const L = Math.max(-140, Math.min(140, f.F[k] / Fsc));
+    if (Math.abs(L) < 2) continue;
+    const ex = A[0] + ux * L,
+      ey = A[1] - uy * L,
+      sg = Math.sign(L),
+      ax = sg * ux,
+      ay = -sg * uy;
+    ctx.strokeStyle = '#0f7c8a';
+    ctx.fillStyle = '#0f7c8a';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(A[0], A[1]);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(ex + ax * 9, ey + ay * 9);
+    ctx.lineTo(ex - ay * 5, ey + ax * 5);
+    ctx.lineTo(ex + ay * 5, ey - ax * 5);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+function drawView() {
+  const dark = matchMedia('(prefers-color-scheme: dark)').matches,
+    W = cv.width,
+    H = cv.height;
+  const f = at(R1, t),
+    h = f.J[0];
+  cx.clearRect(0, 0, W, H);
+  let totL = 0;
+  for (let k = 0; k < f.J.length - 1; k++) totL += Math.hypot(f.J[k + 1][0] - f.J[k][0], f.J[k + 1][1] - f.J[k][1]);
+  const S = Math.min(42, 720 / Math.max(totL, 1));
+  const sc = p => [W * 0.68 + (p[0] - h[0]) * S, H / 2 - (p[1] - h[1]) * S];
+  const pa = R1.path;
+  cx.strokeStyle = css('--road');
+  cx.lineWidth = 3;
+  cx.setLineDash([12, 9]);
+  cx.beginPath();
+  let st = false;
+  for (let k = 0; k < pa.n; k += 4) {
+    const p = sc([pa.xs[k], pa.ys[k]]);
+    if (p[0] < -50 || p[0] > W + 50) {
+      st = false;
+      continue;
+    }
+    st ? cx.lineTo(p[0], p[1]) : cx.moveTo(p[0], p[1]);
+    st = true;
+  }
+  cx.stroke();
+  cx.setLineDash([]);
+  if (pa.releaseLine) {
+    const p = sc(pa.releaseLine[0]),
+      q = sc(pa.releaseLine[1]);
+    cx.save();
+    cx.strokeStyle = 'rgba(250,200,40,.9)';
+    cx.lineWidth = Math.max(2, 0.12 * S);
+    cx.beginPath();
+    cx.moveTo(p[0], p[1]);
+    cx.lineTo(q[0], q[1]);
+    cx.stroke();
+    cx.fillStyle = 'rgba(250,200,40,.95)';
+    cx.font = '13px system-ui';
+    cx.textAlign = 'center';
+    cx.fillText('lâcher les gaz', (p[0] + q[0]) / 2, Math.min(p[1], q[1]) - 10);
+    cx.restore();
+  }
+  if (pa.brakeLine) {
+    const p = sc(pa.brakeLine[0]),
+      q = sc(pa.brakeLine[1]);
+    cx.save();
+    cx.strokeStyle = 'rgba(235,235,235,.85)';
+    cx.lineWidth = Math.max(2, 0.12 * S);
+    cx.beginPath();
+    cx.moveTo(p[0], p[1]);
+    cx.lineTo(q[0], q[1]);
+    cx.stroke();
+    cx.restore();
+  }
+  drawEvents(cx, sc, Math.max(6, 0.3 * S), t);
+  pa.cones.forEach((c, ci) => {
+    const p = sc(c),
+      ht = R1.hits && R1.hits.t[ci];
+    cx.fillStyle = (ht !== null && ht !== undefined && t >= ht) ? '#d0342c' : '#f08a24';
+    cx.beginPath();
+    cx.moveTo(p[0], p[1] - 9);
+    cx.lineTo(p[0] - 7, p[1] + 6);
+    cx.lineTo(p[0] + 7, p[1] + 6);
+    cx.closePath();
+    cx.fill();
+  });
+  if (window.drawPatch) drawPatch(cx, sc, S);
+  if (R0 && R0.frames.length) {
+    const g = at(R0, Math.min(t, R0.tEnd));
+    cx.save();
+    cx.globalAlpha = .45;
+    drawConvoy(cx, g, sc, S, dark, true);
+    cx.restore();
+  }
+  drawConvoy(cx, f, sc, S, dark, false);
+  if (showF) drawForces(cx, f, sc, R1.Fsc);
+  cx.strokeStyle = css('--mut');
+  cx.fillStyle = css('--mut');
+  cx.lineWidth = 2;
+  cx.font = '13px system-ui';
+  const x1 = W - 20,
+    x0 = x1 - 5 * S;
+  cx.beginPath();
+  cx.moveTo(x0, H - 26);
+  cx.lineTo(x1, H - 26);
+  cx.moveTo(x0, H - 31);
+  cx.lineTo(x0, H - 21);
+  cx.moveTo(x1, H - 31);
+  cx.lineTo(x1, H - 21);
+  cx.stroke();
+  cx.fillText('5 m', (x0 + x1) / 2 - 10, H - 34);
+  cx.fillStyle = css('--ink');
+  cx.font = '14px system-ui';
+  {
+    const fq = R1.frames[Math.min(R1.frames.length - 1, Math.max(0, Math.floor(t / DTF)))];
+    cx.fillText('braquage de la tête δ = ' + fmt(f.dl * 180 / Math.PI, 1) + '°' + (fq && fq.Cm !== undefined ? '   —   c moyen = ' + fq.Cm + ' N·m·s/rad (adapté à la vitesse)' : ''), 14, 24);
+  } {
+    const fv = R1.frames[Math.min(R1.frames.length - 1, Math.max(0, Math.floor(t / DTF)))];
+    cx.font = 'bold 18px system-ui';
+    cx.fillText('vitesse : ' + fmt(Math.abs(fv.v) * 3.6, 1) + ' km/h', 14, 50);
+    // jauges des pédales : l'effort moteur demandé au convoi est ramené à la capacité de traction des roues motrices (accélérateur) ou à un freinage de 0,4 g (frein) ; roue libre si aucun effort
+    const Nn = fv.v !== undefined && R1.frames[0].th.length,
+      Fc = fv.Fc || 0,
+      rw = +$('xRf').value || 0.23,
+      regS = +($('xTq').value) || 100,
+      Ftot = Math.max(1, (Nn - 1) * 2 * (typeof Tmot === 'function' ? Tmot(Math.abs(fv.v) * 3.6, 1, regS) : 150) / rw),
+      Fbr = Math.max(1, (R1.Mtot || 3000) * 9.81 * 0.4);
+    const rec = !!fv.Lr && Fc < -50,
+      libre = Math.abs(Fc) < 50,
+      acc = libre ? 0 : Math.max(0, Math.min(1, Fc / Ftot)),
+      fre = (libre || rec) ? 0 : Math.max(0, Math.min(1, -Fc / Fbr)),
+      recv = rec ? Math.max(0, Math.min(1, -Fc / Ftot)) : 0;
+    const gauge = (y, lab, v, col) => {
+      cx.font = '12px system-ui';
+      cx.fillStyle = css('--mut');
+      cx.fillText(lab, 14, y + 10);
+      cx.strokeStyle = libre ? '#e8b400' : css('--line');
+      cx.lineWidth = libre ? 2 : 1.4;
+      cx.strokeRect(96.5, y + 0.5, 140, 12);
+      cx.fillStyle = col;
+      cx.fillRect(97, y + 1, Math.round(139 * v), 11);
+      cx.fillStyle = css('--ink');
+      cx.fillText(Math.round(v * 100) + ' %', 244, y + 10);
+    };
+    gauge(62, 'accélérateur', acc, '#2e9e5b');
+    gauge(80, 'frein (méca.)', fre, '#d0342c');
+    gauge(98, 'récupération', recv, '#8e44ad');
+    if (libre) {
+      cx.fillStyle = '#e8b400';
+      cx.beginPath();
+      cx.roundRect(14, 118, 120, 22, 6);
+      cx.fill();
+      cx.fillStyle = '#1b1b1b';
+      cx.font = 'bold 13px system-ui';
+      cx.fillText('ROUE LIBRE', 28, 133);
+    }
+  }
+  $('rt').textContent = fmt(Math.min(t, TT), 1);
+  $('tm').value = Math.round(1000 * Math.min(t, TT) / TT);
+}
+
+function drawOverview() {
+  const W = ov.width,
+    H = ov.height,
+    m = 18,
+    a = R1.bb;
+  let w = a[1] - a[0],
+    h = a[3] - a[2];
+  w = Math.max(w, 1);
+  h = Math.max(h, 1);
+  const S = Math.min((W - 2 * m) / w, (H - 2 * m) / h),
+    cxm = (a[0] + a[1]) / 2,
+    cym = (a[2] + a[3]) / 2;
+  const sc = p => [W / 2 + (p[0] - cxm) * S, H / 2 - (p[1] - cym) * S];
+  ox.clearRect(0, 0, W, H);
+  const pa = R1.path;
+  ox.strokeStyle = css('--road');
+  ox.lineWidth = 3;
+  ox.setLineDash([10, 8]);
+  ox.beginPath();
+  for (let k = 0; k < pa.n; k += 4) {
+    const p = sc([pa.xs[k], pa.ys[k]]);
+    k ? ox.lineTo(p[0], p[1]) : ox.moveTo(p[0], p[1]);
+  }
+  ox.stroke();
+  ox.setLineDash([]);
+  if (pa.releaseLine) {
+    const p = sc(pa.releaseLine[0]),
+      q = sc(pa.releaseLine[1]);
+    ox.strokeStyle = 'rgba(250,200,40,.9)';
+    ox.lineWidth = 2;
+    ox.beginPath();
+    ox.moveTo(p[0], p[1]);
+    ox.lineTo(q[0], q[1]);
+    ox.stroke();
+  }
+  if (pa.brakeLine) {
+    const p = sc(pa.brakeLine[0]),
+      q = sc(pa.brakeLine[1]);
+    ox.strokeStyle = 'rgba(235,235,235,.85)';
+    ox.lineWidth = 2;
+    ox.beginPath();
+    ox.moveTo(p[0], p[1]);
+    ox.lineTo(q[0], q[1]);
+    ox.stroke();
+  }
+  drawEvents(ox, sc, 5, t);
+  pa.cones.forEach((c, ci) => {
+    const p = sc(c),
+      ht = R1.hits && R1.hits.t[ci];
+    ox.fillStyle = (ht !== null && ht !== undefined && t >= ht) ? '#d0342c' : '#f08a24';
+    ox.beginPath();
+    ox.arc(p[0], p[1], pa.cones.length > 60 ? 1.3 : 3, 0, 7);
+    ox.fill();
+  });
+  const trail = (R, idxf, col, dash) => {
+    ox.strokeStyle = col;
+    ox.lineWidth = 2;
+    ox.setLineDash(dash || []);
+    ox.beginPath();
+    const n = Math.min(R.frames.length, Math.floor(Math.min(t, R.tEnd) / DTF) + 1);
+    for (let i = 0; i < n; i++) {
+      const p = sc(idxf(R.frames[i]));
+      i ? ox.lineTo(p[0], p[1]) : ox.moveTo(p[0], p[1]);
+    }
+    ox.stroke();
+    ox.setLineDash([]);
+  };
+  if (R0) trail(R0, f => f.A[f.A.length - 1], css('--ghost'), [6, 4]);
+  trail(R1, f => f.A[f.A.length - 1], css('--tail'));
+  trail(R1, f => f.J[0], css('--head'));
+  const f = at(R1, t);
+  ox.strokeStyle = css('--ink');
+  ox.lineWidth = 3;
+  ox.beginPath();
+  f.J.forEach((p, i) => {
+    const q = sc(p);
+    i ? ox.lineTo(q[0], q[1]) : ox.moveTo(q[0], q[1]);
+  });
+  ox.stroke();
+  ox.fillStyle = css('--mut');
+  ox.font = '12px system-ui';
+  ox.fillText('vue d\'ensemble : trajectoire de la tête (jaune) et de la queue (vert)', 10, 14);
+}
+
+function drawGraph() {
+  const W = gr.width,
+    H = gr.height,
+    ml = 52,
+    mr = 14,
+    mt = 28,
+    mb = 30,
+    pw = (W - ml - mr - 40) / 2;
+  gx.clearRect(0, 0, W, H);
+  const series = [];
+  if (R0) series.push([R0, 'et', css('--ghost'), [6, 4]]);
+  series.push([R1, 'et', css('--tail'), []], [R1, 'eh', css('--head'), []]);
+  let ym = 0.5;
+  for (const [R, k] of series)
+    for (const f of R.frames) ym = Math.max(ym, Math.abs(f[k]));
+  ym = Math.ceil(Math.min(ym * 1.1, 12) * 100 / 10) * 10;
+  const draw = (x0, title, unit, getv, ymax, sers) => {
+    const X = tt => x0 + tt / TT * pw,
+      Y = v => mt + (H - mt - mb) / 2 - v / ymax * (H - mt - mb) / 2;
+    gx.strokeStyle = css('--line');
+    gx.lineWidth = 1;
+    gx.fillStyle = css('--mut');
+    gx.font = '12px system-ui';
+    for (const v of [-ymax, 0, ymax]) {
+      gx.beginPath();
+      gx.moveTo(x0, Y(v));
+      gx.lineTo(x0 + pw, Y(v));
+      gx.stroke();
+      gx.fillText(fmt(v, v % 1 ? 1 : 0), x0 - 34, Y(v) + 4);
+    }
+    for (let s = 0; s <= TT; s += Math.max(1, Math.round(TT / 6))) {
+      gx.fillText(s + ' s', X(s) - 8, H - 10);
+    }
+    gx.fillStyle = css('--ink');
+    gx.fillText(title + ' (' + unit + ')', x0, 16);
+    for (const [R, k, col, dash, sc] of sers) {
+      gx.strokeStyle = col;
+      gx.lineWidth = 2;
+      gx.setLineDash(dash);
+      gx.beginPath();
+      let first = true;
+      for (const f of R.frames) {
+        if (f.t > t) break;
+        const v = Math.max(-ymax, Math.min(ymax, getv(f, k)));
+        first ? gx.moveTo(X(f.t), Y(v)) : gx.lineTo(X(f.t), Y(v));
+        first = false;
+      }
+      gx.stroke();
+      gx.setLineDash([]);
+    }
+  };
+  draw(ml, 'écart latéral à la trajectoire', 'cm', (f, k) => f[k] * 100, ym, series);
+  let dm = 5;
+  for (const R of [R1, R0])
+    if (R)
+      for (const f of R.frames) dm = Math.max(dm, Math.abs(f.dl) * 180 / Math.PI);
+  dm = Math.ceil(Math.min(dm, 36) / 5) * 5;
+  draw(ml + pw + 40 + 0, 'braquage de la tête δ', '°', (f) => f.dl * 180 / Math.PI, dm, (R0 ? [
+    [R0, 'dl', css('--ghost'), [6, 4]]
+  ] : []).concat([
+    [R1, 'dl', css('--head'), []]
+  ]));
+}
+
+function loop(ts) {
+  if (!R1) {
+    for (const id of ['cv', 'ov', 'gr', 'gt', 'gd', 'ga', 'gf', 'rw', 'gs']) {
+      const c = $(id);
+      c.getContext('2d').clearRect(0, 0, c.width, c.height);
+    }
+    const g = cv.getContext('2d');
+    g.fillStyle = css('--mut');
+    g.font = '16px system-ui';
+    g.textAlign = 'center';
+    g.fillText('Réglez les paramètres puis cliquez sur « Simuler »', cv.width / 2, cv.height / 2);
+    g.textAlign = 'left';
+    requestAnimationFrame(loop);
+    return;
+  }
+  if (last == null) last = ts;
+  const d = (ts - last) / 1000;
+  last = ts;
+  if (playing && R1) {
+    t += d * spd;
+    if (t > TT + 0.5) {
+      t = TT;
+      playing = false;
+      $('play').textContent = '▶ Lecture';
+    }
+  }
+  if (R1) {
+    drawView();
+    drawOverview();
+    drawGraph();
+    drawTorque();
+    deportDraw('gd', [R0 ? {
+      d: R0.dep,
+      col: '#d0342c',
+      dash: [6, 4],
+      label: 'c = 0'
+    } : null, {
+      d: R1.dep,
+      col: '#3b8043',
+      label: 'c moyen = ' + cOf()
+    }], TT, t);
+    seriesDraw('gs', R1.spdTitle, R1.spd, TT, t);
+    if (R1.vin) {
+      const k = +$('selArt').value || 0;
+      seriesDraw('gc', 'couple de consigne et couple réellement fourni par les vérins, articulation J' + (k + 2) + ' (N·m)', {
+        t: R1.frames.map(f => f.t),
+        y: [R1.frames.map(f => f.Md[k]), R1.frames.map(f => f.Ma[k])],
+        names: ['consigne', 'réel']
+      }, TT, t);
+      seriesDraw('gi', 'courants de commande des vannes proportionnelles (A)', R1.cur, TT, t);
+      seriesDraw('gv', 'efforts des vérins pilotés, tige comprimée (N)', R1.fv, TT, t);
+    }
+    if (R1.vec) seriesDraw('gz', 'couples de vectoring Mz sur chaque portion (N·m)', R1.mz, TT, t);
+    seriesDraw('ga', 'accélérations latérales au centre de gravité de chaque portion (m/s²)', R1.acc, TT, t);
+    seriesDraw('gf', 'efforts latéraux des pneus de chaque essieu (N)', R1.frc, TT, t);
+  }
+  requestAnimationFrame(loop);
+}
+$('play').onclick = function () {
+  if (!playing && t >= TT - 1e-6) t = 0;
+  playing = !playing;
+  this.textContent = playing ? '⏸ Pause' : '▶ Lecture';
+};
+$('rst').onclick = () => {
+  t = 0;
+  playing = true;
+  $('play').textContent = '⏸ Pause';
+};
+$('spd').onchange = e => spd = +e.target.value;
+$('tm').oninput = e => {
+  t = e.target.value / 1000 * TT;
+  playing = false;
+  $('play').textContent = '▶ Lecture';
+};
+let timer = null;
+const later = () => {
+  drawDist();
+}; // la simulation ne se lance que sur le bouton « Simuler » (seul l'aperçu de la répartition se met à jour)
+for (const [id, lab, d] of [
+    ['iN', 'vN', 0],
+    ['xLift', 'vLift', 0],
+    ['iV', 'vV', 0],
+    ['iG', 'vG', 1],
+    ['sA', 'vSA', 1],
+    ['tW', 'vTW', 1],
+    ['bW', 'vBW', 1],
+    ['sL', 'vSL', 0],
+    ['sN', 'vSN', 0],
+    ['sT', 'vST', 0],
+    ['tR', 'vTR', 0],
+    ['bR', 'vBR', 0],
+    ['bAng', 'vBA', 0],
+    ['bLead', 'vBL', 0],
+    ['bDec', 'vBD', 1],
+    ['bFrac', 'vBF', 0],
+    ['bVend', 'vBV', 0],
+    ['dLen', 'vDL', 0],
+    ['dDeg', 'vDD', 0],
+    ['tAng', 'vTA', 0],
+    ['tLead', 'vTL', 0],
+    ['uW', 'vuW', 1],
+    ['uA', 'vuA', 1],
+    ['uD', 'vuD', 1],
+    ['uAc', 'vuAc', 1],
+    ['uPd', 'vuPd', 0],
+    ['uEd', 'vuEd', 0],
+    ['uEa', 'vuEa', 1],
+    ['uPt', 'vuPt', 1],
+    ['uPa', 'vuPa', 1],
+    ['kR', 'vkR', 0],
+    ['kN', 'vkN', 0],
+    ['kV1', 'vkV1', 0],
+    ['kA', 'vkA', 1],
+    ['qAm', 'vqAm', 1],
+    ['qT0', 'vqT0', 1],
+    ['qDu', 'vqDu', 1],
+    ['qF', 'vqF', 1],
+    ['qF1', 'vqF1', 1],
+    ['qD', 'vqD', 0]
+  ])
+  $(id).oninput = e => {
+    $(lab).textContent = d ? (+e.target.value).toFixed(1).replace('.', ',') : e.target.value;
+    if (id == 'iN' || id == 'iV') applyOpt();
+    later();
+  };
+$('iC').oninput = e => {
+  $('vC').textContent = cOf();
+  later();
+};
+$('rs').oninput = e => {
+  const v = +e.target.value;
+  $('vRs').textContent = (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(2).replace('.', ',');
+  later();
+};
+$('rp').oninput = e => {
+  $('vRp').textContent = e.target.value;
+  later();
+};
+$('re').oninput = e => {
+  $('vRe').textContent = (+e.target.value).toFixed(2).replace('.', ',');
+  later();
+};
+$('rSide').onchange = later;
+$('iL').onchange = later;
+$('rMode').onchange = () => {
+  const m = $('rMode').value;
+  $('rL').classList.toggle('hid', m != 'lin');
+  for (const k of ['rP1', 'rP2']) $(k).classList.toggle('hid', m != 'poly');
+  for (const k of ['rG1', 'rG2']) $(k).classList.toggle('hid', m != 'gauss');
+  $('rP3').classList.toggle('hid', m != 'poly' && m != 'gauss');
+  later();
+};
+$('rg0').oninput = e => {
+  $('vRg0').textContent = (+e.target.value).toFixed(2).replace('.', ',');
+  later();
+};
+$('rgs').oninput = e => {
+  $('vRgs').textContent = (+e.target.value).toFixed(2).replace('.', ',');
+  later();
+};
+$('iT').oninput = e => {
+  $('vT').textContent = +e.target.value ? e.target.value + ' s' : 'automatique';
+  later();
+};
+for (const [id] of ADV_IDS) $(id).onchange = later;
+$('bRst').onclick = () => {
+  for (const [id] of ADV_IDS) $(id).value = ADV_DEF[id];
+  later();
+};
+$('fr').onchange = e => showF = e.target.checked;
+$('vOn').onchange = later;
+$('iSatP').onchange = later;
+$('iMu').onchange = later;
+$('iFy').onchange = later;
+$('iSat').onchange = later;
+$('iMs').onchange = later;
+$('tDir').onchange = later;
+$('cmp').onchange = later;
+$('bSim').onclick = runAll;
+
+function clearResults() {
+  R1 = R0 = null;
+  t = 0;
+  $('kpi').innerHTML = '';
+  $('rSim').textContent = '';
+  $('msg').textContent = 'Réglez les paramètres puis cliquez sur « Simuler ».';
+  $('rwk').innerHTML = '';
+}
+
+function setTraj(k) {
+  traj = k;
+  for (const [id, key] of [
+      ['tElk', 'elk'],
+      ['tUrb', 'urb'],
+      ['tSla', 'slalom'],
+      ['tTur', 'turn'],
+      ['tCir', 'cir'],
+      ['tStr', 'str'],
+      ['tBrk', 'brake'],
+      ['tDev', 'dev']
+    ]) $(id).classList.toggle('on', key == k);
+  $('oElk').classList.toggle('hid', k != 'elk');
+  $('oSla').classList.toggle('hid', k != 'slalom');
+  $('oTur').classList.toggle('hid', k != 'turn');
+  $('oCir').classList.toggle('hid', k != 'cir');
+  $('oUrb').classList.toggle('hid', k != 'urb');
+  $('oStr').classList.toggle('hid', k != 'str');
+  $('oBrk').classList.toggle('hid', k != 'brake');
+  $('oDev').classList.toggle('hid', k != 'dev');
+  clearResults();
+}
+$('tBrk').onclick = () => setTraj('brake');
+$('tDev').onclick = () => setTraj('dev');
+$('tElk').onclick = () => setTraj('elk');
+$('tSla').onclick = () => setTraj('slalom');
+$('tTur').onclick = () => setTraj('turn');
+$('tCir').onclick = () => setTraj('cir');
+$('uMode').onchange = () => {
+  $('uSeedL').classList.toggle('hid', $('uMode').value != 'rand');
+  clearResults();
+  drawUrbPrev();
+};
+$('uSeed').oninput = () => {
+  clearResults();
+  drawUrbPrev();
+};
+$('uNew').onclick = () => {
+  $('uSeed').value = 1 + Math.floor(Math.random() * 99999);
+  clearResults();
+  drawUrbPrev();
+};
+$('uW').addEventListener('input', drawUrbPrev);
+$('uPed').onchange = () => {
+  $('uPedL').classList.toggle('hid', !$('uPed').checked);
+  clearResults();
+  drawUrbPrev();
+};
+$('uEvN').oninput = $('uEvP').onchange = $('uEvE').onchange = () => {
+  clearResults();
+  drawUrbPrev();
+};
+$('uPedSeed').oninput = () => {
+  clearResults();
+  drawUrbPrev();
+};
+$('uPedNew').onclick = () => {
+  $('uPedSeed').value = 1 + Math.floor(Math.random() * 9999);
+  clearResults();
+  drawUrbPrev();
+};
+$('tUrb').onclick = () => {
+  setTraj('urb');
+  drawUrbPrev();
+  const v = $('iV');
+  if (+v.value != 45) {
+    v.value = 45;
+    v.dispatchEvent(new Event('input'));
+  }
+}; // vitesse maximale en ville : 45 km/h$('tStr').onclick=()=>setTraj('str');$('qK').onchange=()=>{qFields();clearResults();};qFields();
+// paramètres par l'URL (#slalom,V=20,C=3000…)
+{
+  const h = location.hash;
+  for (const [k, id, lab] of [
+      ['N', 'iN', 'vN'],
+      ['V', 'iV', 'vV'],
+      ['G', 'iG', 'vG'],
+      ['T', 'iT', 'vT']
+    ]) {
+    const m = new RegExp('[,#]' + k + '=([0-9.]+)').exec(h);
+    if (m) {
+      $(id).value = m[1];
+      $(lab).textContent = m[1];
+    }
+  } {
+    const m = /[,#]C=([0-9.]+)/.exec(h);
+    if (m) {
+      $('iC').value = Math.round(1000 * Math.sqrt(+m[1] / 100000));
+      $('vC').textContent = cOf();
+    }
+  }
+  if (/,L=1/.test(h)) $('iL').checked = true;
+  {
+    const g = /[,#]R=gauss(?:\/([0-9.]+))?(?:\/([0-9.]+))?(?:\/([0-9.]+))?/.exec(h);
+    if (g) {
+      $('rMode').value = 'gauss';
+      $('rMode').onchange();
+      if (g[1]) {
+        $('rg0').value = g[1];
+        $('vRg0').textContent = g[1];
+      }
+      if (g[2]) {
+        $('rgs').value = g[2];
+        $('vRgs').textContent = g[2];
+      }
+      if (g[3]) $('re').value = g[3];
+    }
+  } {
+    const m = /[,#]R=(lin|poly)(?:\/([-0-9.]+))?(?:\/(front|rear))?(?:\/([0-9]+))?(?:\/([0-9.]+))?/.exec(h);
+    if (m) {
+      $('rMode').value = m[1];
+      $('rMode').onchange();
+      if (m[1] == 'lin' && m[2]) {
+        $('rs').value = m[2];
+        const v = +m[2];
+        $('vRs').textContent = (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(2).replace('.', ',');
+      }
+      if (m[1] == 'poly') {
+        if (m[3]) $('rSide').value = m[3];
+        if (m[4]) $('rp').value = m[4];
+        if (m[5]) $('re').value = m[5];
+      }
+    }
+  }
+  if (/cmp=0/.test(h)) $('cmp').checked = false;
+  if (/verin/.test(h)) $('vOn').checked = true;
+  if (/vec/.test(h)) $('xOn').checked = true;
+  const tm = /[,#]t=([0-9.]+)/.exec(h);
+  setTraj(/urbain|urban|ville/.test(h) ? 'urb' : /cercle|circle/.test(h) ? 'cir' : /volant|steer/.test(h) ? 'str' : /brake|freinage/.test(h) ? 'brake' : /dev/.test(h) ? 'dev' : /slalom/.test(h) ? 'slalom' : /turn|virage/.test(h) ? 'turn' : /elk|elan/.test(h) ? 'elk' : 'str');
+  {
+    const mu = /seed=(\d+)/.exec(h);
+    setTimeout(drawUrbPrev, 0);
+    if (mu) {
+      $('uMode').value = 'rand';
+      $('uSeed').value = mu[1];
+      $('uSeedL').classList.remove('hid');
+    }
+  } {
+    const mk = /kind=(\w+)/.exec(h);
+    if (mk) {
+      $('qK').value = mk[1];
+      qFields();
+    }
+  }
+  if (/[,#]run/.test(h) || tm) {
+    runAll(() => {
+      if (tm) {
+        t = +tm[1];
+        playing = false;
+      }
+    });
+  }
+}
+for (const [id, ev] of [
+    ['iC', 'oninput'],
+    ['rMode', 'onchange'],
+    ['rs', 'oninput'],
+    ['rp', 'oninput'],
+    ['re', 'oninput'],
+    ['rg0', 'oninput'],
+    ['rgs', 'oninput'],
+    ['rSide', 'onchange']
+  ]) {
+  const h = $(id)[ev];
+  $(id)[ev] = e => {
+    if (!autoBusy) $('iAuto').checked = false;
+    if (h) h(e);
+  };
+}
+$('vOn').addEventListener('change', () => {
+  applyOpt();
+});
+$('xOn').addEventListener('change', () => {
+  applyOpt();
+});
+if (/[,#]C=/.test(location.hash)) $('iAuto').checked = false;
+else applyOpt();
+
+function applyShow() {
+  for (const c of document.querySelectorAll('.showc')) {
+    const el = document.getElementById(c.dataset.c);
+    const card = el && el.closest('.card');
+    if (card) card.classList.toggle('hideUser', !c.checked);
+  }
+}
+for (const c of document.querySelectorAll('.showc')) c.onchange = applyShow;
+applyShow();
+drawDist();
+requestAnimationFrame(loop);
+</script></body></html>
